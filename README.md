@@ -24,7 +24,6 @@
 
 ```bash
 # 克隆或下载代码
-git clone [repository-url]
 
 # 安装依赖
 pip install requests pillow
