@@ -67,14 +67,14 @@ class GeminiImageGenerator:
         
     def setup_ui(self):
         """构建左右分区的用户界面"""
-        main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
-        main_paned.pack(fill=tk.BOTH, expand=True)
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
+        self.main_paned.pack(fill=tk.BOTH, expand=True)
         
-        left_panel = ttk.Frame(main_paned)
-        main_paned.add(left_panel, width=600)
+        left_panel = ttk.Frame(self.main_paned)
+        self.main_paned.add(left_panel, width=600)
         
-        right_panel = ttk.Frame(main_paned)
-        main_paned.add(right_panel, width=500)
+        right_panel = ttk.Frame(self.main_paned)
+        self.main_paned.add(right_panel, width=500)
         
         # ===== 左侧面板内容 =====
         
@@ -134,11 +134,11 @@ class GeminiImageGenerator:
         
         def update_char_count(event=None):
             count = len(self.prompt_text.get("1.0", tk.END)) - 1
-            char_label.config(text=f"{count}/{self.MAX_PROMPT_CHARS}")
-            char_label.config(foreground="red" if count > self.MAX_PROMPT_CHARS else "green")
+            self.char_label.config(text=f"{count}/{self.MAX_PROMPT_CHARS}")
+            self.char_label.config(foreground="red" if count > self.MAX_PROMPT_CHARS else "green")
         
-        char_label = ttk.Label(prompt_frame, text=f"0/{self.MAX_PROMPT_CHARS}", font=("TkDefaultFont", 9))
-        char_label.pack(anchor=tk.E)
+        self.char_label = ttk.Label(prompt_frame, text=f"0/{self.MAX_PROMPT_CHARS}", font=("TkDefaultFont", 9))
+        self.char_label.pack(anchor=tk.E)
         self.prompt_text.bind('<KeyRelease>', update_char_count)
         
         # 参考图片区域
@@ -183,9 +183,10 @@ class GeminiImageGenerator:
                                             values=["1K"], state="readonly", width=10)
         self.resolution_combo.grid(row=0, column=3, sticky=tk.W)
         
-        self.generate_btn = ttk.Button(param_grid, text="生成图片", 
-                                      command=self.generate_image, width=25)
-        self.generate_btn.grid(row=0, column=4, padx=(30, 0))
+        # 生成按钮（底部，自动调整大小）
+        self.generate_btn = ttk.Button(param_frame, text="生成图片", 
+                                      command=self.generate_image)
+        self.generate_btn.pack(fill=tk.X, padx=5, pady=(10, 5))
         
         status_frame = ttk.Frame(left_panel)
         status_frame.pack(fill=tk.X, pady=5, padx=5)
@@ -404,7 +405,7 @@ class GeminiImageGenerator:
             parts = [{"text": prompt}]
             
             # 添加参考图片
-            for filepath, image_b64, mime_type, _ in self.reference_images:
+            for _, image_b64, mime_type, _, __ in self.reference_images:
                 parts.append({
                     "inline_data": {
                         "mime_type": mime_type,
@@ -834,6 +835,10 @@ class GeminiImageGenerator:
         new_height = int(base_height * scale)
         self.root.geometry(f"{new_width}x{new_height}")
         
+        # 调整左侧面板宽度，确保网络超时控件不被遮挡
+        min_left_panel_width = int(550 * scale)
+        self.root.after(50, lambda: self.main_paned.sash_place(0, min_left_panel_width, 0))
+        
         # 更新全局字体大小
         try:
             default_font = tk.font.nametofont("TkDefaultFont")
@@ -848,7 +853,6 @@ class GeminiImageGenerator:
             style.configure(".", font=("TkDefaultFont", new_font_size))
             
             # 特殊控件字体调整
-            self.model_hint.config(font=("TkDefaultFont", new_font_size - 1))
             self.char_label.config(font=("TkDefaultFont", new_font_size - 1))
         except:
             pass
