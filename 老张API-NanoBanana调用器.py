@@ -8,6 +8,9 @@ import threading
 import json
 from PIL import Image, ImageTk
 import io
+import platform
+import subprocess
+import ctypes
 
 class GeminiImageGenerator:
     # ==================== 集中定义的常量 ====================
@@ -63,7 +66,7 @@ class GeminiImageGenerator:
         self.generate_thread = None
         
         self.setup_ui()
-        self.minimize_console()
+        self.setup_window_behavior()
         
     def setup_ui(self):
         """构建左右分区的用户界面"""
@@ -857,25 +860,60 @@ class GeminiImageGenerator:
         except:
             pass
 
-    def minimize_console(self):
-        """自动最小化终端窗口（仅Windows）"""
+    def setup_window_behavior(self):
+        """设置窗口行为：最大化tkinter并最小化终端（如可能）"""
+        self._maximize_tkinter_window()
+        self._minimize_terminal_window()
+    
+    def _maximize_tkinter_window(self):
+        """根据操作系统最大化tkinter窗口"""
+        system = platform.system()
         try:
-            import platform
+            if system == "Windows":
+                self.root.state('zoomed')
+            elif system == "Darwin":
+                self.root.attributes('-fullscreen', True)
+            else:
+                self.root.state('zoomed')
+        except Exception:
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    def _minimize_terminal_window(self):
+        """根据操作系统最小化终端窗口"""
+        try:
             system = platform.system()
             
             if system == "Windows":
-                import ctypes
                 hwnd = ctypes.windll.kernel32.GetConsoleWindow()
                 if hwnd:
                     ctypes.windll.user32.ShowWindow(hwnd, 6)
-            elif system in ["Linux", "Darwin"]:
-                # macOS和Linux系统暂不支持自动最小化
-                pass
+            
+            elif system == "Darwin":
+                subprocess.run([
+                    'osascript', '-e', 
+                    'tell application "Terminal" to set miniaturized of window 1 to true'
+                ], stderr=subprocess.DEVNULL, check=False)
+            
             else:
-                # 未知系统不做处理
-                pass
+                try:
+                    result = subprocess.run(
+                        ['xdotool', 'getactivewindow'], 
+                        capture_output=True, text=True, check=False
+                    )
+                    if result.returncode == 0:
+                        window_id = result.stdout.strip()
+                        subprocess.run(
+                            ['xdotool', 'windowminimize', window_id],
+                            stderr=subprocess.DEVNULL, check=False
+                        )
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    pass
+                    
         except Exception:
-            # 任何异常都不影响主程序
             pass
     
     # ==================== 新增方法 ====================
