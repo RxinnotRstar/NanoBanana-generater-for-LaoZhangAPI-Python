@@ -1,16 +1,222 @@
-﻿import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, font
+﻿import sys
+import platform
+import subprocess
+import time
 import os
-from datetime import datetime
+
+# ==================== 依赖配置区 ====================
+# 警告：所有第三方依赖必须在此声明，否则启动时会崩溃
+# ====================================================
+#
+# 如何添加新依赖（只需1行配置 + 1行导入）：
+# ---------------------------------------------------
+# 1. 在此列表中添加元组：
+#    ("pip安装名称", "用户友好名称", "import名称")
+#
+#    示例：
+#    ("numpy", "NumPy计算库", "numpy")
+#
+# 2. 在下面正常导入包：
+#    import numpy
+#
+# 3. 完成！无需修改其他任何地方
+#
+# ---------------------------------------------------
+# 别名包处理示例：
+#   如果写法是：import PIL.Image as Image
+#   配置应该是：("Pillow", "图像处理库", "PIL")
+#
+# ---------------------------------------------------
+# 配置格式说明：
+#   - 第1项：pip install 时使用的包名
+#   - 第2项：给用户看的友好名称
+#   - 第3项：Python 中 import 使用的名称
+#
+# ====================================================
+
+REQUIRED_DEPENDENCIES = [
+    ("requests", "requests"),
+    ("Pillow", "PIL"),
+]
+
+# ====================================================
+
+
+def _get_system_info():
+    """获取详细的系统信息"""
+    system = platform.system()
+    
+    if system == "Windows":
+        version = platform.version()
+        return f"Windows {platform.release()} (版本: {version})"
+    
+    elif system == "Darwin":
+        mac_version = platform.mac_ver()[0]
+        return f"macOS {mac_version}"
+    
+    elif system == "Linux":
+        # 尝试识别Linux发行版
+        try:
+            with open("/etc/os-release", "r") as f:
+                os_info = f.read().lower()
+                
+            if "ubuntu" in os_info:
+                return "Ubuntu Linux"
+            elif "debian" in os_info:
+                return "Debian Linux"
+            elif "centos" in os_info:
+                return "CentOS Linux"
+            elif "fedora" in os_info:
+                return "Fedora Linux"
+            elif "arch" in os_info:
+                return "Arch Linux"
+            else:
+                return "Linux (发行版未知)"
+        except:
+            # 检查常见的包管理器
+            try:
+                if subprocess.run(["which", "apt"], capture_output=True).returncode == 0:
+                    return "Linux (基于Debian/Ubuntu)"
+                elif subprocess.run(["which", "yum"], capture_output=True).returncode == 0:
+                    return "Linux (基于RHEL/CentOS)"
+                elif subprocess.run(["which", "dnf"], capture_output=True).returncode == 0:
+                    return "Linux (基于Fedora/RHEL)"
+                elif subprocess.run(["which", "pacman"], capture_output=True).returncode == 0:
+                    return "Linux (基于Arch)"
+                else:
+                    return "Linux (未知发行版)"
+            except:
+                return "Linux (检测失败)"
+    
+    return system
+
+
+def _get_install_command(package_name, system_info):
+    """根据系统生成安装命令"""
+    if "Windows" in system_info:
+        return f"pip install --user {package_name}"
+    elif "macOS" in system_info:
+        return f"pip3 install --user {package_name}"
+    else:
+        # Linux 和其他系统
+        return f"pip3 install --user {package_name}"
+
+
+def _check_and_handle_dependencies():
+    """检查依赖，如果缺失则提示用户并尝试安装"""
+    missing_deps = []
+    
+    # 检查每个依赖
+    for pip_name, import_name in REQUIRED_DEPENDENCIES:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing_deps.append((pip_name, import_name))
+    
+    if not missing_deps:
+        return  # 所有依赖都已安装
+    
+    # 获取系统信息
+    system_info = _get_system_info()
+    
+    # 构建错误消息
+    error_lines = [
+        "缺少必要的依赖包！",
+        "",
+        f"系统: {system_info}",
+        "",
+        "缺失的依赖包:",
+    ]
+    
+    install_commands = []
+    for pip_name, import_name in missing_deps:
+        error_lines.append(f"  - {pip_name}")
+        install_commands.append(_get_install_command(pip_name, system_info))
+    
+    error_lines.extend([
+        "",
+        "您可以手动运行以下命令安装:",
+        "  " + " && ".join(install_commands),
+        "",
+        "或者按Enter键尝试自动安装 (将安装到用户目录)",
+    ])
+    
+    # 显示错误信息
+    print("\n" + "="*60)
+    print("\n".join(error_lines))
+    print("="*60 + "\n")
+    
+    # 询问是否尝试自动安装
+    try:
+        user_input = input("是否尝试自动安装缺失的包? (按Enter开始，输入n取消): ")
+        if user_input.lower() == 'n':
+            print("取消自动安装，程序将在5秒后退出...")
+            time.sleep(5)
+            sys.exit(1)
+        
+        # 尝试自动安装
+        print("\n正在尝试自动安装...")
+        for pip_name, import_name in missing_deps:
+            cmd = install_commands[missing_deps.index((pip_name, import_name))]
+            print(f"安装 {pip_name}...")
+            try:
+                result = subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
+                print(f"[OK] {display_name} 安装成功")
+            except subprocess.CalledProcessError as e:
+                print(f"[FAIL] {display_name} 安装失败: {e.stderr}")
+                print("\n建议手动运行命令安装，或联系系统管理员")
+                time.sleep(5)
+                sys.exit(1)
+        
+        print("\n所有依赖安装完成！正在启动程序...")
+        time.sleep(2)
+        
+        # 重新检查是否安装成功
+        for pip_name, display_name, import_name in missing_deps:
+            try:
+                __import__(import_name)
+            except ImportError:
+                print(f"警告: 安装后仍然无法导入 {display_name}")
+                print("请手动检查安装")
+                time.sleep(3)
+                sys.exit(1)
+        
+    except KeyboardInterrupt:
+        print("\n用户中断，程序退出")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n发生错误: {e}")
+        print("程序将在5秒后退出...")
+        time.sleep(5)
+        sys.exit(1)
+
+
+# 在导入第三方依赖之前先执行检查
+_check_and_handle_dependencies()
+
+# 依赖检查通过，开始加载程序
+print("\n" + "="*60)
+print("正在加载核心模块，请稍候...")
+print("="*60)
+
+# 现在可以安全导入第三方库
 import requests
+from PIL import Image, ImageTk
+
+# 继续原有的导入
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, font
+from datetime import datetime
 import base64
 import threading
 import json
-from PIL import Image, ImageTk
 import io
-import platform
-import subprocess
 import ctypes
+import tempfile
+
+# 所有模块加载完成
+print("核心模块加载完成")
+print("正在初始化图形界面...\n")
 
 class GeminiImageGenerator:
     # ==================== 集中定义的常量 ====================
@@ -217,8 +423,11 @@ class GeminiImageGenerator:
                                   command=self.save_image, state=tk.DISABLED, width=18)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(btn_frame, text="复制图片", 
-                  command=self.copy_to_clipboard, width=18).pack(side=tk.LEFT, padx=5)
+        # 根据平台设置复制按钮文案
+        copy_text = "复制图片 (BMP)" if platform.system() == "Windows" else "复制图片"
+        self.copy_btn = ttk.Button(btn_frame, text=copy_text, 
+                                  command=self.copy_to_clipboard, state=tk.DISABLED, width=18)
+        self.copy_btn.pack(side=tk.LEFT, padx=5)
         
         response_tab = ttk.Frame(self.output_notebook)
         self.output_notebook.add(response_tab, text="原始响应")
@@ -510,6 +719,7 @@ class GeminiImageGenerator:
                 self.response_text.insert("1.0", json.dumps(display_data, indent=2, ensure_ascii=False))
                 
                 self.save_btn.config(state=tk.NORMAL)
+                self.copy_btn.config(state=tk.NORMAL)
                 self.status_var.set("✅ 生成成功")
                 
                 # 记录日志
@@ -639,35 +849,80 @@ class GeminiImageGenerator:
             messagebox.showerror("保存错误", f"无法保存图片:\n{str(e)}")
 
     def copy_to_clipboard(self):
-        """**改进：真正复制图片到剪贴板（支持Windows/macOS）**"""
+        """复制图片到系统剪贴板（支持多平台）"""
         if not self.current_image_data:
             messagebox.showwarning("警告", "没有可复制的图片")
             return
         
         try:
-            # 解码图片
             image_bytes = base64.b64decode(self.current_image_data)
             img = Image.open(io.BytesIO(image_bytes))
             
-            # **改进：尝试使用PIL的剪贴板功能**
-            try:
-                from PIL import ImageGrab
-                if hasattr(ImageGrab, 'send_image'):  # PIL 9.0+ 支持直接发送
-                    ImageGrab.send_image(img)
-                    messagebox.showinfo("成功", "图片已复制到剪贴板！")
-                    return
-            except Exception as e:
-                print(f"PIL剪贴板功能失败: {e}")
+            system = platform.system()
             
-            # **回退方案：复制完整base64数据**
-            import pyperclip
-            pyperclip.copy(self.current_image_data)
-            messagebox.showinfo("提示", "图片Base64数据已完整复制到剪贴板")
+            if system == "Windows":
+                self._copy_image_windows(img)
+            elif system == "Darwin":
+                self._copy_image_macos(image_bytes)
+            else:
+                self._copy_image_linux(image_bytes)
             
-        except ImportError:
-            messagebox.showerror("错误", "需要安装 pyperclip 库: pip install pyperclip")
+            messagebox.showinfo("成功", "图片已复制到剪贴板！")
+            
         except Exception as e:
             messagebox.showerror("复制错误", f"复制失败:\n{str(e)}")
+
+    def _copy_image_windows(self, img):
+        """Windows平台使用Win32 API复制图片"""
+        from ctypes import wintypes
+        
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+        kernel32 = ctypes.windll.kernel32
+        
+        user32.OpenClipboard(0)
+        user32.EmptyClipboard()
+        
+        output = io.BytesIO()
+        img.convert("RGB").save(output, "BMP")
+        data = output.getvalue()[14:]
+        output.close()
+        
+        hMem = kernel32.GlobalAlloc(0x0002, len(data))
+        locked_mem = kernel32.GlobalLock(hMem)
+        ctypes.memmove(locked_mem, data, len(data))
+        kernel32.GlobalUnlock(hMem)
+        
+        user32.SetClipboardData(8, hMem)
+        user32.CloseClipboard()
+
+    def _copy_image_macos(self, image_bytes):
+        """macOS平台使用命令行工具复制图片"""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
+        
+        try:
+            subprocess.run([
+                "osascript", "-e",
+                f'set the clipboard to (read (POSIX file "{tmp_path}") as PNG picture)'
+            ], check=True, capture_output=True)
+        finally:
+            os.unlink(tmp_path)
+
+    def _copy_image_linux(self, image_bytes):
+        """Linux平台使用命令行工具复制图片"""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
+        
+        try:
+            if os.environ.get("WAYLAND_DISPLAY"):
+                subprocess.run(["wl-copy", "-t", "image/png", tmp_path], check=True)
+            else:
+                subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", tmp_path], check=True)
+        finally:
+            os.unlink(tmp_path)
 
     def save_raw_response(self):
         """保存原始JSON响应到文件"""
@@ -833,10 +1088,32 @@ class GeminiImageGenerator:
             scale = 1.0
         
         # 更新主窗口大小
+        # 如果窗口当前处于最大化（zoomed），先恢复为普通状态再设置 geometry，
+        # 否则 geometry 可能会被忽略，导致缩放看起来无效。
+        try:
+            prev_state = self.root.state()
+        except Exception:
+            prev_state = None
+
+        try:
+            if prev_state == 'zoomed':
+                self.root.state('normal')
+        except Exception:
+            pass
+
         base_width, base_height = 1200, 850
         new_width = int(base_width * scale)
         new_height = int(base_height * scale)
-        self.root.geometry(f"{new_width}x{new_height}")
+        try:
+            self.root.geometry(f"{new_width}x{new_height}")
+        except Exception:
+            pass
+        # 如果之前是最大化，恢复最大化状态（保证行为与原版一致）
+        try:
+            if prev_state == 'zoomed':
+                self.root.state('zoomed')
+        except Exception:
+            pass
         
         # 调整左侧面板宽度，确保网络超时控件不被遮挡
         min_left_panel_width = int(550 * scale)
@@ -844,26 +1121,46 @@ class GeminiImageGenerator:
         
         # 更新全局字体大小
         try:
-            default_font = tk.font.nametofont("TkDefaultFont")
+            # 使用从 tkinter 导入的 font 模块（文件顶部为 `from tkinter import ..., font`）
+            default_font = font.nametofont("TkDefaultFont")
             base_font_size = 10
             new_font_size = int(base_font_size * scale)
             if new_font_size < 8:
                 new_font_size = 8
             default_font.configure(size=new_font_size)
-            
-            # 更新样式
+
+            # 更新样式，确保 ttk 控件使用新的字体族和大小
             style = ttk.Style()
-            style.configure(".", font=("TkDefaultFont", new_font_size))
-            
-            # 特殊控件字体调整
-            self.char_label.config(font=("TkDefaultFont", new_font_size - 1))
-        except:
+            family = default_font.cget("family")
+            style.configure(".", font=(family, new_font_size))
+
+            # 特殊控件字体调整：基于默认字体族创建略小的显示
+            try:
+                small_size = max(new_font_size - 1, 8)
+                self.char_label.config(font=(family, small_size))
+            except Exception:
+                pass
+
+            # 同步调整文本输入与显示框的字体（非 ttk 控件）
+            try:
+                self.prompt_text.config(font=(family, new_font_size))
+            except Exception:
+                pass
+            try:
+                self.response_text.config(font=(family, new_font_size))
+            except Exception:
+                pass
+        except Exception:
             pass
 
     def setup_window_behavior(self):
-        """设置窗口行为：最大化tkinter并最小化终端（如可能）"""
+        """设置窗口行为：最大化tkinter并最小化终端"""
+        # 先最大化tkinter窗口，让用户看到界面
         self._maximize_tkinter_window()
-        self._minimize_terminal_window()
+        
+        # 延迟最小化终端，确保用户能看到加载完成的提示
+        # 在界面完全加载后再最小化，避免用户误以为程序卡死
+        self.root.after(2000, self._minimize_terminal_window)
     
     def _maximize_tkinter_window(self):
         """根据操作系统最大化tkinter窗口"""
