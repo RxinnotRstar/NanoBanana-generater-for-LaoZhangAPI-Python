@@ -222,7 +222,8 @@ class GeminiImageGenerator:
     MAX_REF_IMAGES = 14
     # 最大提示词长度
     MAX_PROMPT_CHARS = 2000
-    # 单张图片最大尺寸 (MB)
+    # 单张图片大小警告阈值 (MB)，超过此值将提示用户但仍允许使用
+    # 开发者可根据需要修改此数值
     MAX_IMAGE_SIZE_MB = 10
     # 模型配置
     MODEL_CONFIGS = {
@@ -354,7 +355,7 @@ class GeminiImageGenerator:
         prompt_frame = ttk.LabelFrame(left_panel, text="提示词 (必填)", padding=10)
         prompt_frame.pack(fill=tk.X, pady=5, padx=5)
         # 提示词输入框
-        self.prompt_text = tk.Text(prompt_frame, height=4, font=("TkDefaultFont", 10))
+        self.prompt_text = tk.Text(prompt_frame, height=12, font=("TkDefaultFont", 10))
         self.prompt_text.pack(fill=tk.BOTH, expand=True)
         # 字符计数标签
         def update_char_count(event=None):
@@ -516,11 +517,12 @@ class GeminiImageGenerator:
         # 逐个处理选择的图片
         for filepath in filepaths:
             try:
-                # 验证文件大小
+                # 验证文件大小并发出警告
                 file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-                if file_size_mb > self.MAX_IMAGE_SIZE_MB: # 限制单张图片最大尺寸
-                    messagebox.showwarning("警告", f"图片过大: {filepath}\n请使用小于{self.MAX_IMAGE_SIZE_MB}MB的图片")
-                    continue
+                if file_size_mb > self.MAX_IMAGE_SIZE_MB:
+                    warning_msg = f"图片较大: {os.path.basename(filepath)}\n大小: {file_size_mb:.1f}MB (警告阈值: {self.MAX_IMAGE_SIZE_MB}MB)\n\n大图片可能导致上传速度变慢或API调用失败。\n\n是否仍要导入这张图片？"
+                    if not messagebox.askyesno("图片大小警告", warning_msg, icon=messagebox.WARNING):
+                        continue
                 
                 # 读取并编码图片
                 with open(filepath, "rb") as f:
@@ -618,6 +620,20 @@ class GeminiImageGenerator:
         if not prompt:
             messagebox.showerror("错误", "提示词不能为空")
             return
+        
+        # 检查是否存在大图片并二次警告
+        large_images = []
+        for filepath, _, _, _ in self.reference_images:
+            file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            if file_size_mb > self.MAX_IMAGE_SIZE_MB:
+                large_images.append((os.path.basename(filepath), file_size_mb))
+        
+        if large_images:
+            file_list = "\n".join([f"  - {name} ({size:.1f}MB)" for name, size in large_images])
+            warning_msg = f"检测到 {len(large_images)} 张图片超过警告阈值 ({self.MAX_IMAGE_SIZE_MB}MB):\n\n{file_list}\n\n大图片可能导致:\n  - 上传时间增加\n  - API响应变慢\n  - 请求超时或失败\n\n是否仍要继续生成？"
+            if not messagebox.askyesno("最终确认", warning_msg, icon=messagebox.WARNING):
+                self.status_var.set("用户取消生成")
+                return
         
         # 禁用生成按钮
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
@@ -899,24 +915,24 @@ class GeminiImageGenerator:
     def _copy_image_windows(self, img):
         """Windows平台使用Win32 API复制图片"""
         from ctypes import wintypes
-        
+        # 使用ctypes调用Win32 API
         user32 = ctypes.windll.user32
         gdi32 = ctypes.windll.gdi32
         kernel32 = ctypes.windll.kernel32
-        
+        # 打开剪贴板
         user32.OpenClipboard(0)
         user32.EmptyClipboard()
-        
+        # 转换图片为BMP格式，文件的体积会比PNG大很多
         output = io.BytesIO()
         img.convert("RGB").save(output, "BMP")
         data = output.getvalue()[14:]
         output.close()
-        
+        # 分配全局内存并复制数据
         hMem = kernel32.GlobalAlloc(0x0002, len(data))
         locked_mem = kernel32.GlobalLock(hMem)
         ctypes.memmove(locked_mem, data, len(data))
         kernel32.GlobalUnlock(hMem)
-        
+        # 设置剪贴板数据
         user32.SetClipboardData(8, hMem)
         user32.CloseClipboard()
     # macOS平台复制图片
