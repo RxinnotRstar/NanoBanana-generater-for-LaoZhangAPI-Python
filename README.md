@@ -23,6 +23,7 @@
 - Python 3.7+
 - Windows 10/11（推荐）、Linux、macOS
 - 网络连接（需访问 `api.laozhang.ai`）
+- `requests` 和 `Pillow` 依赖，不过这个脚本会帮你处理
 
 ## 安装步骤
 
