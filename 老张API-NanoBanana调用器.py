@@ -1198,10 +1198,23 @@ class GeminiImageGenerator:
     # 设置窗口行为
     def setup_window_behavior(self):
         """设置窗口行为：最大化tkinter并最小化终端"""
-        # 先最大化tkinter窗口，让用户看到界面
+        # 在tk窗口显示前获取终端窗口ID（此时终端肯定是活动窗口）
+        self.terminal_window_id = None
+        try:
+            if platform.system() == "Linux":
+                result = subprocess.run(
+                    ['xdotool', 'getactivewindow'], 
+                    capture_output=True, text=True, check=False
+                )
+                if result.returncode == 0:
+                    self.terminal_window_id = result.stdout.strip()
+        except Exception:
+            self.terminal_window_id = None
+        
+        # 最大化tkinter窗口
         self._maximize_tkinter_window()
-        # 延迟最小化终端，确保用户能看到加载完成的提示
-        # 在界面完全加载后再最小化，避免用户误以为程序卡死
+        
+        # 延迟最小化终端，使用之前捕获的窗口ID
         self.root.after(2000, self._minimize_terminal_window)
     # 最大化tkinter窗口
     def _maximize_tkinter_window(self):
@@ -1239,14 +1252,9 @@ class GeminiImageGenerator:
             
             else:
                 try:
-                    result = subprocess.run(
-                        ['xdotool', 'getactivewindow'], 
-                        capture_output=True, text=True, check=False
-                    )
-                    if result.returncode == 0:
-                        window_id = result.stdout.strip()
+                    if self.terminal_window_id:
                         subprocess.run(
-                            ['xdotool', 'windowminimize', window_id],
+                            ['xdotool', 'windowminimize', self.terminal_window_id],
                             stderr=subprocess.DEVNULL, check=False
                         )
                 except FileNotFoundError:
