@@ -1,6 +1,6 @@
 # Gemini AI（Nano banana）图像生成器 - 老张API专版
 
-一款基于 tkinter 的应用程序，通过 Nano Banana API （老张API）调用 Google Gemini 模型生成图像。支持参考图上传、多分辨率选择和实时界面缩放。
+一款基于 tkinter 的应用程序，通过 Nano Banana API （老张API）调用 Google Gemini 模型生成图像。支持参考图上传、多分辨率选择和实时界面缩放。使用 Kimi AI 编写代码。
 
 我的邀请链接：https://api.laozhang.ai/register/?aff_code=EVOV
 
