@@ -292,7 +292,7 @@ class GeminiImageGenerator:
     def setup_ui(self):
         """构建左右分区的用户界面"""
         # 主分区
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=10, bg="#ccc")
         self.main_paned.pack(fill=tk.BOTH, expand=True)
         # 左侧面板
         left_panel = ttk.Frame(self.main_paned)
@@ -355,7 +355,14 @@ class GeminiImageGenerator:
         prompt_frame = ttk.LabelFrame(left_panel, text="提示词 (必填)", padding=10)
         prompt_frame.pack(fill=tk.X, pady=5, padx=5)
         # 提示词输入框
-        self.prompt_text = tk.Text(prompt_frame, height=12, font=("TkDefaultFont", 10))
+        self.prompt_text = tk.Text(
+            prompt_frame, 
+            height=12, 
+            font=("TkDefaultFont", 10),
+            undo=True,
+            maxundo=50,
+            autoseparators=True
+        )
         self.prompt_text.pack(fill=tk.BOTH, expand=True)
         # 字符计数标签
         def update_char_count(event=None):
@@ -475,11 +482,83 @@ class GeminiImageGenerator:
         # 显示完整数据按钮
         ttk.Button(resp_btn_frame, text="显示完整数据", 
                   command=self.show_full_data, width=18).pack(side=tk.LEFT, padx=10)
-        # 插入数据警告按钮
-        self.response_text.bind('<Button-1>', lambda e: self._insert_data_warning())
+        # 设置只读模式，阻止编辑但允许选择和复制
+        self.response_text.bind('<Key>', lambda e: "break")
+        self.response_text.bind('<Button-1>', lambda e: "break")
+        self._create_context_menu(self.response_text)
 
         # 根据当前模型更新UI状态，确保启动时分辨率选项正确
         self.on_model_change()
+        
+        # 为提示词文本框添加右键菜单
+        self._create_context_menu(self.prompt_text)
+
+    # ==================== 文本框增强功能 ====================
+    def _create_context_menu(self, text_widget):
+        """为指定Text组件创建右键菜单"""
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        menu.add_command(label="撤销", command=text_widget.edit_undo, 
+                        accelerator="Ctrl+Z")
+        menu.add_command(label="重做", command=text_widget.edit_redo,
+                        accelerator="Ctrl+Y")
+        menu.add_separator()
+        menu.add_command(label="剪切", 
+                        command=lambda: self._cut_text(text_widget),
+                        accelerator="Ctrl+X")
+        menu.add_command(label="复制", 
+                        command=lambda: self._copy_text(text_widget),
+                        accelerator="Ctrl+C")
+        menu.add_command(label="粘贴", 
+                        command=lambda: self._paste_text(text_widget),
+                        accelerator="Ctrl+V")
+        menu.add_separator()
+        menu.add_command(label="全选", 
+                        command=lambda: text_widget.tag_add('sel', '1.0', 'end'),
+                        accelerator="Ctrl+A")
+        
+        text_widget.bind("<Button-3>", lambda e: self._show_menu(e, menu))
+        if platform.system() == "Darwin":
+            text_widget.bind("<Button-2>", lambda e: self._show_menu(e, menu))
+            text_widget.bind("<Control-Button-1>", lambda e: self._show_menu(e, menu))
+
+    def _show_menu(self, event, menu):
+        """显示右键菜单"""
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _cut_text(self, text_widget):
+        """剪切文本"""
+        try:
+            selected = text_widget.selection_get()
+            text_widget.clipboard_clear()
+            text_widget.clipboard_append(selected)
+            text_widget.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+
+    def _copy_text(self, text_widget):
+        """复制文本"""
+        try:
+            selected = text_widget.selection_get()
+            text_widget.clipboard_clear()
+            text_widget.clipboard_append(selected)
+        except tk.TclError:
+            pass
+
+    def _paste_text(self, text_widget):
+        """粘贴文本"""
+        try:
+            clipboard = text_widget.clipboard_get()
+            try:
+                text_widget.delete("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+            text_widget.insert(tk.INSERT, clipboard)
+        except tk.TclError:
+            pass
 
     # ==================== 核心功能实现 ====================
     # 获取当前模型的 API 端点
