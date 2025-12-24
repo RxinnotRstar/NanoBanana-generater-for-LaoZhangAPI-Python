@@ -292,40 +292,64 @@ class GeminiImageGenerator:
     def setup_ui(self):
         """构建左右分区的用户界面"""
         # 主分区
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=10, bg="#ccc")
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=8, bg="#ffd2dc")
         self.main_paned.pack(fill=tk.BOTH, expand=True)
         # 左侧面板
         left_panel = ttk.Frame(self.main_paned)
-        self.main_paned.add(left_panel, width=600)
+        self.main_paned.add(left_panel, width=450) 
+
         # 右侧面板
         right_panel = ttk.Frame(self.main_paned)
         self.main_paned.add(right_panel, width=500)
 
         # ===== 左侧面板内容 =====
-        # 界面缩放控制（无框，独立显示在API配置上方）
+        # 一个无框容器，单独放在最顶上。不要自己加框，免得导致界面缩放的控件因为奇葩屏幕而被遮挡/溢出
         zoom_frame = ttk.Frame(left_panel)
-        zoom_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
-        ttk.Label(zoom_frame, text="界面缩放:").pack(side=tk.LEFT, padx=(0, 5))
+        zoom_frame.pack(fill=tk.BOTH, padx=2, pady=(2,2))
+
+        # 界面缩放选项（左侧）
+        ttk.Label(zoom_frame, text="界面缩放:").pack(side=tk.LEFT, padx=(0,4), pady=(0,0))
         zoom_combo = ttk.Combobox(zoom_frame, textvariable=self.zoom_var, 
-                                  values=["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%"],
-                                  state="readonly", width=6)
+                                  values=["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"],
+                                  state="readonly", width=5)
         zoom_combo.bind("<<ComboboxSelected>>", self.on_zoom_change)
         zoom_combo.pack(side=tk.LEFT)
+
+        # 日志记录选项（右侧）
+        log_check = ttk.Checkbutton(zoom_frame, text="保存日志到文件", variable=self.log_to_file,
+                                   command=self.on_log_toggle)
+        log_check.pack(side=tk.RIGHT, padx=(5, 5))
+
+        # 网络超时设置（居中，特殊处理，或许可以再优化一下）
+            # 0. 放一个空的容器，置于zoom_frame的中上
+        ttk.Frame(zoom_frame, height=0).pack(side=tk.TOP, fill=tk.Y, expand=True)
+            # 1. 在zoom_frame里面新建timeout_frame，并置于中上
+        timeout_frame = ttk.Frame(zoom_frame)
+        timeout_frame.pack(side=tk.TOP, fill=tk.Y)
+            # 2. 把文本和输入框放在timeout_frame里面，一个左一个右
+        ttk.Label(timeout_frame, text="网络超时(秒):").pack(side=tk.LEFT)
+        timeout_entry = ttk.Entry(timeout_frame, textvariable=self.network_timeout, width=8, validate='key',
+                                 validatecommand=(self.root.register(self._validate_timeout), '%P'))
+        timeout_entry.pack(side=tk.RIGHT)
+            # 3. 放一个空的容器，置于zoom_frame的中下
+        ttk.Frame(zoom_frame, height=0).pack(side=tk.BOTTOM, fill=tk.Y, expand=True)
+
         # API配置区域
         api_frame = ttk.LabelFrame(left_panel, text="API配置", padding=10)
         api_frame.pack(fill=tk.X, pady=5, padx=5)
-        # API密钥输入
+
+        # API密钥输入（更改“show=”可以实现替换加密文本，别忘了更改下面的按钮里面的文本）
         ttk.Label(api_frame, text="API密钥:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="*", width=40)
+        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=40)
         api_entry.grid(row=0, column=1, sticky=tk.W)
         self.api_key_entry = api_entry
         # 显示/隐藏API密钥按钮
         def toggle_key_visibility():
-            if api_entry['show'] == '*':
+            if api_entry['show'] == '草':
                 api_entry.config(show='')
                 toggle_btn.config(text='隐藏')
             else:
-                api_entry.config(show='*')
+                api_entry.config(show='草')
                 toggle_btn.config(text='显示')
         # 绑定回车键触发生成
         toggle_btn = ttk.Button(api_frame, text='显示', command=toggle_key_visibility, width=4)
@@ -338,17 +362,9 @@ class GeminiImageGenerator:
         # 绑定模型选择事件
         model_combo.grid(row=1, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo.bind("<<ComboboxSelected>>", self.on_model_change)
-        # 日志记录选项
-        ttk.Label(api_frame, text="日志记录:").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
-        log_check = ttk.Checkbutton(api_frame, text="保存日志到文件", variable=self.log_to_file,
-                                   command=self.on_log_toggle)
-        log_check.grid(row=2, column=1, sticky=tk.W, pady=(10, 0))
+
         
-        # 网络超时设置
-        ttk.Label(api_frame, text="网络超时(秒):").grid(row=2, column=2, sticky=tk.W, padx=(20, 5), pady=(10, 0))
-        timeout_entry = ttk.Entry(api_frame, textvariable=self.network_timeout, width=8, validate='key',
-                                 validatecommand=(self.root.register(self._validate_timeout), '%P'))
-        timeout_entry.grid(row=2, column=3, sticky=tk.W, pady=(10, 0))
+
         
         
         # 提示词区域
@@ -1239,7 +1255,7 @@ class GeminiImageGenerator:
             pass
 
         # 调整左侧面板宽度
-        min_left_panel_width = int(550 * scale)
+        min_left_panel_width = int(450 * scale)
         self.root.after(50, lambda: self.main_paned.sash_place(0, min_left_panel_width, 0))
         
         # 更新全局字体大小
