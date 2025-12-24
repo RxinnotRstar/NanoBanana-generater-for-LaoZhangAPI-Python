@@ -220,11 +220,16 @@ class GeminiImageGenerator:
     # ==================== 集中定义的常量 ====================
     # 最大参考图片数量
     MAX_REF_IMAGES = 14
+
     # 最大提示词长度
     MAX_PROMPT_CHARS = 2000
-    # 单张图片大小警告阈值 (MB)，超过此值将提示用户但仍允许使用
-    # 开发者可根据需要修改此数值
+
+    # 单张图片大小警告阈值 (MB)，超过此值将提示用户但仍允许使用，可按需修改
     MAX_IMAGE_SIZE_MB = 10
+    # 根据作者实测，利用回归函数（y=ax+b）计算左侧面板的宽度
+    LEFT_WIDTH_SLOPE = 2.645      # 每增加 1% 缩放，面板宽度增加的像素
+    LEFT_WIDTH_INTERCEPT = 200   # 缩放 0% 时的基准宽度（理论值，用于平移）
+
     # 模型配置
     MODEL_CONFIGS = {
         "gemini-2.5-flash-image": {
@@ -252,23 +257,27 @@ class GeminiImageGenerator:
         self.root.title("老张API-NanoBanana图片生成器")
         self.root.geometry("1100x700")
         
-        # 配置变量
-        # API密钥
-        self.api_key = tk.StringVar()
-        # 默认选择最新版模型
+        # ————配置变量
+        # API密钥，在【value=""】的引号里面填写自己的密钥，就可以启动后自动输入密钥了
+        # 示例：
+        # self.api_key = tk.StringVar(value="sk-1234567890987654321")
+        self.api_key = tk.StringVar(value="")
+        # 默认模型选择
         self.model_var = tk.StringVar(value="gemini-3-pro-image-preview")
-        # 生成参数
+        # 默认生成参数
         self.aspect_ratio = tk.StringVar(value="1:1")
-        # 默认分辨率4K（如果模型支持）
+        # 默认分辨率（取决于模型设置）
         self.resolution = tk.StringVar(value="4K")
-        # 日志记录选项
+        # 默认日志记录选项
         self.log_to_file = tk.BooleanVar(value=False)
-        # 网络超时设置
+        # 默认网络超时设置
         self.network_timeout = tk.StringVar(value="1200")
         # 界面缩放
         self.zoom_var = tk.StringVar(value="100%")
+        # 默认提示词行数设置
+        self.line_count_var = tk.IntVar(value=12)
         
-        # 数据存储
+        # ————数据存储
         # 参考图片列表，存储格式为 (文件路径, base64字符串, mime类型, 原始PIL图像)
         self.reference_images = []
         # 当前生成的图片数据（base64）
@@ -277,12 +286,11 @@ class GeminiImageGenerator:
         self.current_image_preview = None
         # 最后一次的原始响应数据
         self.last_raw_response = None
-        
         # UI状态存储（用于缩放切换）
         self._ui_state_cache = {}
-        
         # 线程控制
         self.generate_thread = None
+
         # 构建UI
         self.setup_ui()
         self.setup_window_behavior()
@@ -296,7 +304,7 @@ class GeminiImageGenerator:
         self.main_paned.pack(fill=tk.BOTH, expand=True)
         # 左侧面板
         left_panel = ttk.Frame(self.main_paned)
-        self.main_paned.add(left_panel, width=450) 
+        self.main_paned.add(left_panel) 
 
         # 右侧面板
         right_panel = ttk.Frame(self.main_paned)
@@ -370,25 +378,44 @@ class GeminiImageGenerator:
         # 提示词区域
         prompt_frame = ttk.LabelFrame(left_panel, text="提示词 (必填)", padding=10)
         prompt_frame.pack(fill=tk.X, pady=5, padx=5)
+
+        # 提示词控制栏（行数设置和字符计数）
+        control_frame = ttk.Frame(prompt_frame)
+        control_frame.pack(fill=tk.X)
+
+        # 行数控制（左侧）
+        ttk.Label(control_frame, text="行数:").pack(side=tk.LEFT)
+        
+        def update_line_count(delta):
+            current = self.line_count_var.get()
+            new_val = max(2, min(98, current + delta))
+            self.line_count_var.set(new_val)
+            self.prompt_text.config(height=new_val)
+        ttk.Label(control_frame, textvariable=self.line_count_var).pack(side=tk.LEFT, padx=(2,8))        
+        ttk.Button(control_frame, text="-1", width=3, command=lambda: update_line_count(-1)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(control_frame, text="+1", width=3, command=lambda: update_line_count(1)).pack(side=tk.LEFT, padx=1)
+
+        # 字符计数标签（右侧）
+        def update_char_count(event=None):
+            count = len(self.prompt_text.get("1.0", "end-1c"))
+            self.char_label.config(text=f"{count}/{self.MAX_PROMPT_CHARS}")
+            self.char_label.config(foreground="red" if count > self.MAX_PROMPT_CHARS else "green")
+        
+        self.char_label = ttk.Label(control_frame, text=f"0/{self.MAX_PROMPT_CHARS}", font=("TkDefaultFont", 9), anchor=tk.E)
+        self.char_label.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+
         # 提示词输入框
         self.prompt_text = tk.Text(
             prompt_frame, 
-            height=12, 
+            height=self.line_count_var.get(), 
             font=("TkDefaultFont", 10),
             undo=True,
             maxundo=50,
             autoseparators=True
         )
         self.prompt_text.pack(fill=tk.BOTH, expand=True)
-        # 字符计数标签
-        def update_char_count(event=None):
-            count = len(self.prompt_text.get("1.0", "end-1c"))
-            self.char_label.config(text=f"{count}/{self.MAX_PROMPT_CHARS}")
-            self.char_label.config(foreground="red" if count > self.MAX_PROMPT_CHARS else "green")
-        # 初始字符计数
-        self.char_label = ttk.Label(prompt_frame, text=f"0/{self.MAX_PROMPT_CHARS}", font=("TkDefaultFont", 9))
-        self.char_label.pack(anchor=tk.E)
         self.prompt_text.bind('<KeyRelease>', update_char_count)
+        update_char_count()
         
         # 参考图片区域
         ref_frame = ttk.LabelFrame(left_panel, text=f"参考图片 (可选, 最多{self.MAX_REF_IMAGES}张)", padding=10)
@@ -505,6 +532,9 @@ class GeminiImageGenerator:
 
         # 根据当前模型更新UI状态，确保启动时分辨率选项正确
         self.on_model_change()
+        
+        # 首次启动时按回归函数设置左侧宽度
+        self.root.after(50, self._apply_zoom)
         
         # 为提示词文本框添加右键菜单
         self._create_context_menu(self.prompt_text)
@@ -1255,7 +1285,8 @@ class GeminiImageGenerator:
             pass
 
         # 调整左侧面板宽度
-        min_left_panel_width = int(450 * scale)
+        zoom_percent = int(zoom_str)
+        min_left_panel_width = int(round(self.LEFT_WIDTH_SLOPE * zoom_percent + self.LEFT_WIDTH_INTERCEPT))
         self.root.after(50, lambda: self.main_paned.sash_place(0, min_left_panel_width, 0))
         
         # 更新全局字体大小
