@@ -29,6 +29,11 @@ REQUIRED_DEPENDENCIES = [
     ("Pillow", "PIL"),
 ]
 
+# Windows平台可选依赖（缺失时自动安装但不作为启动必要条件）
+WINDOWS_OPTIONAL_DEPENDENCIES = [
+    ("pywin32", "win32clipboard"),
+]
+
 # ==============以下是依赖检查与安装逻辑=================
 
 # 获取系统信息的辅助函数
@@ -98,7 +103,7 @@ def _check_and_handle_dependencies():
     """检查依赖，如果缺失则提示用户并尝试安装"""
     missing_deps = []
     
-    # 检查每个依赖
+    # 检查必要依赖
     for pip_name, import_name in REQUIRED_DEPENDENCIES:
         # 尝试导入模块
         try:
@@ -106,9 +111,18 @@ def _check_and_handle_dependencies():
         # 捕获导入错误
         except ImportError:
             missing_deps.append((pip_name, import_name))
-    # 如果没有缺失的依赖，直接返回
-    if not missing_deps:
-        return  # 所有依赖都已安装
+    
+    # 如果有必要依赖缺失，在Windows下额外检查可选依赖
+    if missing_deps and platform.system() == "Windows":
+        for pip_name, import_name in WINDOWS_OPTIONAL_DEPENDENCIES:
+            try:
+                __import__(import_name)
+            except ImportError:
+                missing_deps.append((pip_name, import_name))
+    
+    # 如果没有缺失的必要依赖，直接返回（不检查可选依赖）
+    if not any(pip_name in [req[0] for req in REQUIRED_DEPENDENCIES] for pip_name, _ in missing_deps):
+        return  # 所有必要依赖都已安装
     
     # 获取系统信息
     system_info = _get_system_info()
@@ -276,6 +290,20 @@ class GeminiImageGenerator:
         self.zoom_var = tk.StringVar(value="100%")
         # 默认提示词行数设置
         self.line_count_var = tk.IntVar(value=12)
+        
+        # 检测pywin32可用性（仅Windows平台）
+        self.pywin32_available = False
+        self._win32clipboard = None
+        self._win32con = None
+        if platform.system() == "Windows":
+            try:
+                import win32clipboard
+                import win32con
+                self._win32clipboard = win32clipboard
+                self._win32con = win32con
+                self.pywin32_available = True
+            except ImportError:
+                self.pywin32_available = False
         
         # ————数据存储
         # 参考图片列表，存储格式为 (文件路径, base64字符串, mime类型, 原始PIL图像)
@@ -484,8 +512,14 @@ class GeminiImageGenerator:
         img_tab = ttk.Frame(self.output_notebook)
         self.output_notebook.add(img_tab, text="生成的图片")
         # 图片预览区域
-        self.img_preview = ttk.Label(img_tab, text="生成的图片将在此显示", 
-                                    relief=tk.SUNKEN, anchor=tk.CENTER, background="white")
+        if platform.system() == "Windows" and not self.pywin32_available:
+            preview_text = "生成的图片将在此显示\n\n当前环境未安装pywin32，仅支持复制BMP图片（文件体积极大）\n安装命令：pip install --user pywin32"
+            self.img_preview = ttk.Label(img_tab, text=preview_text, 
+                                        relief=tk.SUNKEN, anchor=tk.CENTER, background="white",
+                                        foreground="red")
+        else:
+            self.img_preview = ttk.Label(img_tab, text="生成的图片将在此显示", 
+                                        relief=tk.SUNKEN, anchor=tk.CENTER, background="white")
         self.img_preview.pack(fill=tk.BOTH, expand=True)
         # 图片操作按钮
         btn_frame = ttk.Frame(img_tab)
@@ -494,8 +528,14 @@ class GeminiImageGenerator:
                                   command=self.save_image, state=tk.DISABLED, width=18)
         self.save_btn.pack(side=tk.LEFT, padx=5)
 
-        # 根据平台设置复制按钮文案
-        copy_text = "复制图片 (BMP)" if platform.system() == "Windows" else "复制图片"
+        # 根据平台和pywin32可用性设置复制按钮文案
+        if platform.system() == "Windows":
+            if self.pywin32_available:
+                copy_text = "复制图片"
+            else:
+                copy_text = "复制图片 (BMP)"
+        else:
+            copy_text = "复制图片"
         self.copy_btn = ttk.Button(btn_frame, text=copy_text, 
                                   command=self.copy_to_clipboard, state=tk.DISABLED, width=18)
         self.copy_btn.pack(side=tk.LEFT, padx=5)
@@ -1038,26 +1078,48 @@ class GeminiImageGenerator:
             messagebox.showerror("复制错误", f"复制失败:\n{str(e)}")
     # Windows平台复制图片
     def _copy_image_windows(self, img):
-        """Windows平台使用Win32 API复制图片"""
+        """Windows平台复制图片（优先使用pywin32实现多格式支持）"""
+        if self.pywin32_available and self._win32clipboard and self._win32con:
+            try:
+                output_bmp = io.BytesIO()
+                img.convert("RGB").save(output_bmp, "BMP")
+                bmp_data = output_bmp.getvalue()[14:]
+                output_bmp.close()
+                
+                output_png = io.BytesIO()
+                img.save(output_png, "PNG")
+                png_data = output_png.getvalue()
+                output_png.close()
+                
+                self._win32clipboard.OpenClipboard()
+                self._win32clipboard.EmptyClipboard()
+                
+                self._win32clipboard.SetClipboardData(self._win32con.CF_DIB, bmp_data)
+                
+                self._win32clipboard.SetClipboardData(self._win32clipboard.RegisterClipboardFormat("PNG"), png_data)
+                
+                self._win32clipboard.CloseClipboard()
+                return
+            except Exception as e:
+                print(f"pywin32复制失败，回退到ctypes方案: {e}")
+        
         from ctypes import wintypes
-        # 使用ctypes调用Win32 API
         user32 = ctypes.windll.user32
-        gdi32 = ctypes.windll.gdi32
         kernel32 = ctypes.windll.kernel32
-        # 打开剪贴板
+        
         user32.OpenClipboard(0)
         user32.EmptyClipboard()
-        # 转换图片为BMP格式，文件的体积会比PNG大很多
+        
         output = io.BytesIO()
         img.convert("RGB").save(output, "BMP")
         data = output.getvalue()[14:]
         output.close()
-        # 分配全局内存并复制数据
+        
         hMem = kernel32.GlobalAlloc(0x0002, len(data))
         locked_mem = kernel32.GlobalLock(hMem)
         ctypes.memmove(locked_mem, data, len(data))
         kernel32.GlobalUnlock(hMem)
-        # 设置剪贴板数据
+        
         user32.SetClipboardData(8, hMem)
         user32.CloseClipboard()
     # macOS平台复制图片
