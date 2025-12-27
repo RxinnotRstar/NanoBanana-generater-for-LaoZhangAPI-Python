@@ -242,7 +242,7 @@ class GeminiImageGenerator:
     MAX_IMAGE_SIZE_MB = 10
     # 根据作者实测，利用回归函数（y=ax+b）计算左侧面板的宽度
     LEFT_WIDTH_SLOPE = 2.645      # 每增加 1% 缩放，面板宽度增加的像素
-    LEFT_WIDTH_INTERCEPT = 200   # 缩放 0% 时的基准宽度（理论值，用于平移）
+    LEFT_WIDTH_INTERCEPT = 220   # 缩放 0% 时的基准宽度（理论值，用于平移）
 
     # 模型配置
     MODEL_CONFIGS = {
@@ -286,10 +286,12 @@ class GeminiImageGenerator:
         self.log_to_file = tk.BooleanVar(value=False)
         # 默认网络超时设置
         self.network_timeout = tk.StringVar(value="1200")
+        # 默认思考模式设置（仅Nano Banana 2支持）
+        self.thinking_mode = tk.BooleanVar(value=True)
         # 界面缩放
         self.zoom_var = tk.StringVar(value="100%")
         # 默认提示词行数设置
-        self.line_count_var = tk.IntVar(value=12)
+        self.line_count_var = tk.IntVar(value=5)
         
         # 检测pywin32可用性（仅Windows平台）
         self.pywin32_available = False
@@ -310,6 +312,8 @@ class GeminiImageGenerator:
         self.reference_images = []
         # 当前生成的图片数据（base64）
         self.current_image_data = None
+        # 当前生成的图片MIME类型
+        self.current_image_mime_type = None
         # 当前生成的图片预览（PIL ImageTk 对象）
         self.current_image_preview = None
         # 最后一次的原始响应数据
@@ -323,7 +327,19 @@ class GeminiImageGenerator:
         self.setup_ui()
         self.setup_window_behavior()
         # 初始化完成
-
+    def update_status(self, message):
+        """更新状态栏文本"""
+        if hasattr(self, 'status_text'):
+            self.status_text.config(state=tk.NORMAL)
+                    
+            # 追加新内容（带时间戳）
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.status_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        
+            # 自动滚动到底部
+            self.status_text.see(tk.END)
+        
+            self.status_text.config(state=tk.DISABLED)
     # ==================== 界面构建函数 ====================
     def setup_ui(self):
         """构建左右分区的用户界面"""
@@ -475,32 +491,40 @@ class GeminiImageGenerator:
         param_grid = ttk.Frame(param_frame)
         param_grid.pack(fill=tk.X)
         # 纵横比和分辨率选择
-        ttk.Label(param_grid, text="纵横比:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Label(param_grid, text="纵横比:").grid(row=0, column=0, sticky=tk.W, padx=(0, 2))
         aspect_combo = ttk.Combobox(param_grid, textvariable=self.aspect_ratio,
                                    values=["21:9", "16:9", "4:3", "3:2", "1:1", 
                                            "9:16", "3:4", "2:3", "5:4", "4:5"],
-                                   state="readonly", width=10)
+                                   state="readonly", width=5)
         aspect_combo.grid(row=0, column=1, sticky=tk.W)
         # 分辨率选择
-        ttk.Label(param_grid, text="分辨率:").grid(row=0, column=2, sticky=tk.W, padx=(30, 10))
+        ttk.Label(param_grid, text="分辨率:").grid(row=0, column=2, sticky=tk.W, padx=(10, 2))
         self.resolution_combo = ttk.Combobox(param_grid, textvariable=self.resolution,
-                                            values=["1K"], state="readonly", width=10)
+                                            values=["1K"], state="readonly", width=5)
         self.resolution_combo.grid(row=0, column=3, sticky=tk.W)
+
+        # 思考模式选项（仅Nano Banana 2支持）
+        self.thinking_check = ttk.Checkbutton(param_grid, text="思考模式", variable=self.thinking_mode,
+                                             command=self.on_thinking_toggle)
+        self.thinking_check.grid(row=0, column=4, sticky=tk.W,padx=(10, 0))
 
         # 生成按钮（底部，自动调整大小）
         self.generate_btn = ttk.Button(param_frame, text="生成图片", 
                                       command=self.generate_image)
         self.generate_btn.pack(fill=tk.X, padx=5, pady=(10, 5))
+
+
         # 状态栏
         status_frame = ttk.Frame(left_panel)
-        status_frame.pack(fill=tk.X, pady=5, padx=5)
-        self.status_var = tk.StringVar(value="就绪")
-        # 旧的状态栏实现，会导致标签宽度不自适应，改为expand=True
-        # ttk.Label(status_frame, textvariable=self.status_var, relief=tk.SUNKEN, 
-        #          font=("TkDefaultFont", 9)).pack(fill=tk.X)
-        ttk.Label(status_frame, textvariable=self.status_var, relief=tk.SUNKEN,
-                 font=("TkDefaultFont", 9)).pack(fill=tk.X, expand=True)
+        status_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
 
+        # 改用Text组件以支持多行和动态高度
+        self.status_text = tk.Text(status_frame, height=2, wrap=tk.WORD, 
+                                  font=("TkDefaultFont", 9), relief=tk.SUNKEN, 
+                                  bg="#f0f0f0", fg="black")
+        self.status_text.pack(fill=tk.BOTH, expand=True)
+        self.status_text.insert("1.0", "就绪")
+        self.status_text.config(state=tk.DISABLED)  # 设为只读
         # ===== 右侧面板内容 =====
         # 输出预览区域
         output_frame = ttk.LabelFrame(right_panel, text="输出预览", padding=10)
@@ -705,7 +729,7 @@ class GeminiImageGenerator:
                 messagebox.showerror("错误", f"加载图片失败: {filepath}\n{str(e)}")
         # 更新预览
         self.update_reference_preview()
-        self.status_var.set(f"已添加 {len(filepaths)} 张参考图片")
+        self.update_status(f"已添加 {len(filepaths)} 张参考图片")
 
     def update_reference_preview(self):
         """更新参考图片预览"""
@@ -761,7 +785,7 @@ class GeminiImageGenerator:
         if 0 <= index < len(self.reference_images):
             del self.reference_images[index]
             self.update_reference_preview()
-            self.status_var.set(f"已删除第 {index+1} 张参考图片")
+            self.update_status(f"已删除第 {index+1} 张参考图片")
     # 清空参考图片
     def clear_images(self):
         """清空所有参考图片"""
@@ -772,7 +796,7 @@ class GeminiImageGenerator:
             self.reference_images.clear()
             self.ref_canvas.delete("all")
             self.ref_count_label.config(text=f"已选择: 0/{self.MAX_REF_IMAGES}张")
-            self.status_var.set("已清空所有参考图片")
+            self.update_status("已清空所有参考图片")
     # 生成图片
     def generate_image(self):
         """开始生成图片"""
@@ -797,12 +821,12 @@ class GeminiImageGenerator:
             file_list = "\n".join([f"  - {name} ({size:.1f}MB)" for name, size in large_images])
             warning_msg = f"检测到 {len(large_images)} 张图片超过警告阈值 ({self.MAX_IMAGE_SIZE_MB}MB):\n\n{file_list}\n\n大图片可能导致:\n  - 上传时间增加\n  - API响应变慢\n  - 请求超时或失败\n\n是否仍要继续生成？"
             if not messagebox.askyesno("最终确认", warning_msg, icon=messagebox.WARNING):
-                self.status_var.set("用户取消生成")
+                self.update_status("用户取消生成")
                 return
         
         # 禁用生成按钮
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
-        self.status_var.set("正在生成图片...")
+        self.update_status("正在生成图片...")
         
         # 在后台线程中执行
         self.generate_thread = threading.Thread(
@@ -842,6 +866,11 @@ class GeminiImageGenerator:
             # Nano Banana 2 支持分辨率参数
             if self.model_var.get() == "gemini-3-pro-image-preview":
                 payload["generationConfig"]["imageConfig"]["imageSize"] = self.resolution.get()
+                # 添加思考模式配置
+                if self.thinking_mode.get():
+                    payload["generationConfig"]["thinkingConfig"] = {
+                        "includeThoughts": True
+                    }
             
             # 发送请求
             headers = {
@@ -873,7 +902,7 @@ class GeminiImageGenerator:
             if response.status_code != 200:
                 error_msg = f"HTTP错误 {response.status_code}: {response.text}"
                 messagebox.showerror("API错误", error_msg)
-                self.status_var.set(f"生成失败: HTTP {response.status_code}")
+                self.update_status(f"生成失败: HTTP {response.status_code}")
                 # **改进：记录错误日志**
                 if self.log_to_file.get():
                     self._save_log({"error": error_msg, "status_code": response.status_code}, "error")
@@ -886,7 +915,7 @@ class GeminiImageGenerator:
             if "error" in result:
                 error_msg = result["error"].get("message", str(result["error"]))
                 messagebox.showerror("API错误", error_msg)
-                self.status_var.set("生成失败: API错误")
+                self.update_status("生成失败: API错误")
                 # **改进：记录错误日志**
                 if self.log_to_file.get():
                     self._save_log({"error": error_msg, "raw_response": result}, "error")
@@ -910,7 +939,9 @@ class GeminiImageGenerator:
                     raise ValueError("响应中未找到图片数据")
                 
                 image_data = candidate["content"]["parts"][0]["inlineData"]["data"]
+                mime_type = candidate["content"]["parts"][0]["inlineData"].get("mimeType", "image/png")
                 self.current_image_data = image_data
+                self.current_image_mime_type = mime_type
                 
                 # 显示图片
                 self._show_image()
@@ -922,7 +953,7 @@ class GeminiImageGenerator:
                 
                 self.save_btn.config(state=tk.NORMAL)
                 self.copy_btn.config(state=tk.NORMAL)
-                self.status_var.set("生成成功")
+                self.update_status("生成成功")
                 
                 # 记录日志
                 if self.log_to_file.get():
@@ -932,7 +963,7 @@ class GeminiImageGenerator:
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
                 self.response_text.insert("1.0", json.dumps(result, indent=2, ensure_ascii=False))
-                self.status_var.set(f"生成失败: {str(e)[:50]}...")
+                self.update_status(f"生成失败: {str(e)[:50]}...")
         # 捕获异常并提示
         finally:
             self.generate_btn.config(state=tk.NORMAL, text="生成图片")
@@ -940,7 +971,7 @@ class GeminiImageGenerator:
     def _handle_error(self, error_msg):
         """处理异常错误"""
         messagebox.showerror("错误", f"生成过程中发生异常:\n{error_msg}")
-        self.status_var.set("生成失败: 异常错误")
+        self.update_status("生成失败: 异常错误")
         self.generate_btn.config(state=tk.NORMAL, text="生成图片")
         
         # **改进：记录错误日志**
@@ -1021,15 +1052,30 @@ class GeminiImageGenerator:
             messagebox.showwarning("警告", "没有可保存的图片")
             return
         
+        # 根据MIME类型确定默认扩展名
+        mime_to_ext = {
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png"
+        }
+        default_ext = mime_to_ext.get(self.current_image_mime_type, ".png")
+        
         # 生成默认文件名
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_short = self.model_var.get().split("-")[1]  # "2.5" 或 "3"
-        default_filename = f"gemini_{model_short}_{self.resolution.get()}_{timestamp}.png"
+        default_filename = f"gemini_{model_short}_{self.resolution.get()}_{timestamp}{default_ext}"
+        
+        # 设置文件类型选项
+        if self.current_image_mime_type == "image/jpeg":
+            file_types = [("JPEG图片", "*.jpg"), ("所有文件", "*.*")]
+        else:
+            file_types = [("PNG图片", "*.png"), ("所有文件", "*.*")]
+        
         # 打开保存对话框
         filepath = filedialog.asksaveasfilename(
             title="保存图片",
-            defaultextension=".png",
-            filetypes=[("PNG图片", "*.png"), ("所有文件", "*.*")],
+            defaultextension=default_ext,
+            filetypes=file_types,
             initialfile=default_filename
         )
         # 用户取消保存
@@ -1041,7 +1087,7 @@ class GeminiImageGenerator:
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
             # 更新状态栏
-            self.status_var.set(f" 图片已保存: {os.path.basename(filepath)}")
+            self.update_status(f" 图片已保存: {os.path.basename(filepath)}")
             
             # 记录日志
             if self.log_to_file.get():
@@ -1049,7 +1095,7 @@ class GeminiImageGenerator:
                 # 可选：提示保存成功
                 # messagebox.showinfo("成功", f"图片已保存: {filepath}")
                 # 或者改为状态栏提示，避免频繁弹窗
-                # self.status_var.set(f" 图片已保存: {os.path.basename(filepath)}")
+                # self.update_status(f" 图片已保存: {os.path.basename(filepath)}")
         except Exception as e:
             messagebox.showerror("保存错误", f"无法保存图片:\n{str(e)}")
     # 复制图片到剪贴板
@@ -1171,7 +1217,7 @@ class GeminiImageGenerator:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(self.last_raw_response, f, indent=2, ensure_ascii=False)
             
-            self.status_var.set(f" 响应数据已保存")
+            self.update_status(f" 响应数据已保存")
         except Exception as e:
             messagebox.showerror("保存错误", f"无法保存响应数据:\n{str(e)}")
     # 显示完整数据
@@ -1220,6 +1266,7 @@ class GeminiImageGenerator:
                 "aspect_ratio": self.aspect_ratio.get(),
                 "resolution": self.resolution.get(),
                 "network_timeout": self.network_timeout.get(),
+                "thinking_mode": self.thinking_mode.get(),
                 "reference_images": len(self.reference_images),
                 "api_key": hidden_api_key,  # 修复：使用占位符代替真实密钥
                 "data": data
@@ -1240,12 +1287,19 @@ class GeminiImageGenerator:
     def on_log_toggle(self):
         """日志开关切换时的处理"""
         if self.log_to_file.get():
-            self.status_var.set("✓ 已启用日志记录（敏感信息已脱敏）")
+            self.update_status("已启用日志记录（敏感信息已脱敏）")
         else:
-            self.status_var.set("✗ 已禁用日志记录")
+            self.update_status("已禁用日志记录")
+
+    def on_thinking_toggle(self):
+        """思考模式开关切换时的处理"""
+        if self.thinking_mode.get():
+            self.update_status("已启用思考模式")
+        else:
+            self.update_status("已禁用思考模式")
     # 模型切换处理
     def on_model_change(self, event=None):
-        """模型切换时更新分辨率选项"""
+        """模型切换时更新分辨率选项和思考模式状态"""
         model = self.model_var.get().strip()
         config = self.MODEL_CONFIGS.get(model, {})
         # 根据模型配置更新分辨率选项
@@ -1253,10 +1307,15 @@ class GeminiImageGenerator:
         if config.get("stable"):  # gemini-2.5-flash-image
             self.resolution_combo.config(values=["1K"], state="readonly")
             self.resolution.set("1K")
+            # 禁用思考模式
+            self.thinking_check.config(state=tk.DISABLED)
+            self.thinking_mode.set(False)
         # Nano Banana 2 支持多分辨率
         else:  # gemini-3-pro-image-preview
             self.resolution_combo.config(values=["1K", "2K", "4K"], state="readonly")
             self.resolution.set("4K")  # 默认4K
+            # 启用思考模式
+            self.thinking_check.config(state=tk.NORMAL)
     # 缩放比例变化处理
     def on_zoom_change(self, event=None):
         self._apply_zoom()
@@ -1271,10 +1330,12 @@ class GeminiImageGenerator:
             'resolution': self.resolution.get(),
             'log_to_file': self.log_to_file.get(),
             'network_timeout': self.network_timeout.get(),
+            'thinking_mode': self.thinking_mode.get(),
             'reference_images': self.reference_images.copy(),
             'current_image_data': self.current_image_data,
             'last_raw_response': self.last_raw_response,
-            'response_text': self.response_text.get("1.0", tk.END).strip()
+            'response_text': self.response_text.get("1.0", tk.END).strip(),
+            'status_text': self.status_text.get("1.0", tk.END).strip()
         }
         self._ui_state_cache = state
     # 恢复UI状态
@@ -1290,6 +1351,7 @@ class GeminiImageGenerator:
         self.resolution.set(state['resolution'])
         self.log_to_file.set(state['log_to_file'])
         self.network_timeout.set(state['network_timeout'])
+        self.thinking_mode.set(state.get('thinking_mode', False))
 
         self.prompt_text.delete("1.0", tk.END)
         self.prompt_text.insert("1.0", state['prompt'])
@@ -1297,10 +1359,16 @@ class GeminiImageGenerator:
         self.response_text.delete("1.0", tk.END)
         self.response_text.insert("1.0", state['response_text'])
         
+        self.status_text.config(state=tk.NORMAL)
+        self.status_text.delete("1.0", tk.END)
+        self.status_text.insert("1.0", state.get('status_text', ''))
+        self.status_text.config(state=tk.DISABLED)
+        
         self.reference_images = state['reference_images']
         self.update_reference_preview()
         
         self.current_image_data = state['current_image_data']
+        self.current_image_mime_type = state.get('current_image_mime_type', 'image/png')
         if self.current_image_data:
             self._show_image()
             self.save_btn.config(state=tk.NORMAL)
@@ -1376,6 +1444,11 @@ class GeminiImageGenerator:
                 pass
             try:
                 self.response_text.config(font=(family, new_font_size))
+            except Exception:
+                pass
+            
+            try:
+                self.status_text.config(font=(family, int(new_font_size * 0.75)))
             except Exception:
                 pass
         except Exception:
