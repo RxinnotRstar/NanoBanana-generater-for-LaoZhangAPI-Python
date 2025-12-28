@@ -7,6 +7,7 @@ import platform
 import subprocess
 import time
 import os
+import shutil
 
 # ================ 依赖检查与自动安装模块 ================
 # 这是一个针对用户的防呆设计，可以自动检测并安装缺失的依赖
@@ -257,6 +258,68 @@ class GeminiImageGenerator:
             "display_name": "最新版"
         }
     }
+    
+    # 嵌入的图片提取脚本代码
+    EXPORT_SCRIPT_CODE = '''import tkinter as tk,tkinter.filedialog as fd,tkinter.messagebox as mb,json,base64
+from PIL import Image,ImageTk
+import io
+class V:
+ def __init__(self,r):
+  self.r=r;r.title("日志图片查看器");r.geometry("770x364")
+  self.b=None;self.d=None;self.t=None;self.c=None;self.n=None;self.s=0;self.j=None
+  f=tk.Frame(r,padx=10,pady=3);f.pack(fill=tk.X)
+  tk.Button(f,text="打开Log文件",command=self.l).pack(side=tk.LEFT)
+  self.e=tk.Button(f,text="保存图片",command=self.v,state=tk.DISABLED);self.e.pack(side=tk.RIGHT,padx=5)
+  self.h=tk.Button(f,text="旋转图片",command=self.o,state=tk.DISABLED);self.h.pack(side=tk.RIGHT,padx=5)
+  self.i=tk.Label(f,text="等待加载log文件…",fg="blue");self.i.pack(side=tk.RIGHT,padx=10)
+  self.g=tk.Label(f,text="未选择文件",fg="gray");self.g.pack(side=tk.LEFT,padx=10)
+  m=tk.Frame(r,bg="lightgray");m.pack(fill=tk.BOTH,expand=True,padx=3,pady=0)
+  self.a=tk.Canvas(m,bg="white");self.a.pack(fill=tk.BOTH,expand=True);self.a.bind("<Configure>",self.w);self.p=None
+ def w(self,event):
+  if self.j:self.r.after_cancel(self.j)
+  if self.d and event.width>100 and event.height>100:self.j=self.r.after(50,lambda:self.u(event.width,event.height))
+ def l(self):
+  p=fd.askopenfilename(title="选择日志文件",filetypes=[("success日志","*_success.log"),("所有文件","*.*")])
+  if not p:return
+  self.i.config(text="正在加载文件...",fg="orange");self.r.update()
+  try:
+   with open(p,'r',encoding='utf-8')as f:d=json.load(f);b=self.x(d)
+   if b:
+    self.b=b;self.d=Image.open(io.BytesIO(b));self.s=0;self.t=None;self.c=None
+    self.n=f"image_{d.get('timestamp','unknown')}.jpg"
+    self.u(self.a.winfo_width(),self.a.winfo_height())
+    self.g.config(text=f"已加载: {p.split('/')[-1]}");self.e.config(state=tk.NORMAL);self.h.config(state=tk.NORMAL);self.i.config(fg="blue")
+   else:mb.showwarning("警告","未找到有效的图片数据");self.i.config(text="未找到图片数据",fg="red")
+  except Exception as e:mb.showerror("错误",f"加载失败: {str(e)}");self.i.config(text="加载失败",fg="red")
+ def x(self,d):
+  for c in d.get("data",{}).get("candidates",[]):
+   for p in c.get("content",{}).get("parts",[]):
+    i=p.get("inlineData",{})
+    if i.get("mimeType")=="image/jpeg"and i.get("data"):return base64.b64decode(i["data"])
+  return None
+ def u(self,w,h):
+  if not self.d:return
+  if self.t is None:
+   self.t=self.d.copy()if self.s==0 else self.d.rotate(-self.s,expand=True)
+  r=self.t
+  if r.width>w or r.height>h:
+   s=min(w/r.width,h/r.height);k=int(r.width*s),int(r.height*s)
+   if self.c is None or self.c.size!=k:self.c=r.resize(k,Image.Resampling.LANCZOS)
+   m=self.c
+  else:m=r
+  self.i.config(text=f"图片尺寸: {r.width} x {r.height} | 旋转: {self.s}°")
+  self.k=ImageTk.PhotoImage(m)
+  if self.p:self.a.delete(self.p)
+  self.a.delete("all");self.p=self.a.create_image(w//2,h//2,anchor=tk.CENTER,image=self.k)
+ def o(self):self.s=(self.s+90)%360;self.t=None;self.c=None;self.u(self.a.winfo_width(),self.a.winfo_height())
+ def v(self):
+  if not self.b:return
+  p=fd.asksaveasfilename(defaultextension=".jpg",filetypes=[("JPEG文件","*.jpg"),("PNG文件","*.png"),("所有文件","*.*")],initialfile=self.n or"export_image.jpg")
+  if not p:return
+  try:open(p,'wb').write(self.b);mb.showinfo("成功",f"图片已保存: {p}")
+  except Exception as e:mb.showerror("错误",f"保存失败: {str(e)}")
+if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
+'''
     # ==================== 初始化与UI构建 ====================
     def __init__(self, root):
         self.root = root
@@ -286,8 +349,6 @@ class GeminiImageGenerator:
         self.log_to_file = tk.BooleanVar(value=False)
         # 默认网络超时设置
         self.network_timeout = tk.StringVar(value="1200")
-        # 默认思考模式设置（仅Nano Banana 2支持）
-        self.thinking_mode = tk.BooleanVar(value=True)
         # 界面缩放
         self.zoom_var = tk.StringVar(value="100%")
         # 默认提示词行数设置
@@ -392,7 +453,7 @@ class GeminiImageGenerator:
 
         # API密钥输入（更改“show=”可以实现替换加密文本，别忘了更改下面的按钮里面的文本）
         ttk.Label(api_frame, text="API密钥:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=40)
+        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=25)
         api_entry.grid(row=0, column=1, sticky=tk.W)
         self.api_key_entry = api_entry
         # 显示/隐藏API密钥按钮
@@ -410,7 +471,7 @@ class GeminiImageGenerator:
         ttk.Label(api_frame, text="模型:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo = ttk.Combobox(api_frame, textvariable=self.model_var, 
                                    values=list(self.MODEL_CONFIGS.keys()),
-                                   state="readonly", width=30)
+                                   state="readonly", width=20)
         # 绑定模型选择事件
         model_combo.grid(row=1, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo.bind("<<ComboboxSelected>>", self.on_model_change)
@@ -502,11 +563,6 @@ class GeminiImageGenerator:
         self.resolution_combo = ttk.Combobox(param_grid, textvariable=self.resolution,
                                             values=["1K"], state="readonly", width=5)
         self.resolution_combo.grid(row=0, column=3, sticky=tk.W)
-
-        # 思考模式选项（仅Nano Banana 2支持）
-        self.thinking_check = ttk.Checkbutton(param_grid, text="思考模式", variable=self.thinking_mode,
-                                             command=self.on_thinking_toggle)
-        self.thinking_check.grid(row=0, column=4, sticky=tk.W,padx=(10, 0))
 
         # 生成按钮（底部，自动调整大小）
         self.generate_btn = ttk.Button(param_frame, text="生成图片", 
@@ -856,7 +912,7 @@ class GeminiImageGenerator:
                     "parts": parts
                 }],
                 "generationConfig": {
-                    "responseModalities": ["IMAGE"],
+                    "responseModalities": ["IMAGE"],################################################################################################################################
                     "imageConfig": {
                         "aspectRatio": self.aspect_ratio.get()
                     }
@@ -866,11 +922,6 @@ class GeminiImageGenerator:
             # Nano Banana 2 支持分辨率参数
             if self.model_var.get() == "gemini-3-pro-image-preview":
                 payload["generationConfig"]["imageConfig"]["imageSize"] = self.resolution.get()
-                # 添加思考模式配置
-                if self.thinking_mode.get():
-                    payload["generationConfig"]["thinkingConfig"] = {
-                        "includeThoughts": True
-                    }
             
             # 发送请求
             headers = {
@@ -1266,7 +1317,6 @@ class GeminiImageGenerator:
                 "aspect_ratio": self.aspect_ratio.get(),
                 "resolution": self.resolution.get(),
                 "network_timeout": self.network_timeout.get(),
-                "thinking_mode": self.thinking_mode.get(),
                 "reference_images": len(self.reference_images),
                 "api_key": hidden_api_key,  # 修复：使用占位符代替真实密钥
                 "data": data
@@ -1287,16 +1337,17 @@ class GeminiImageGenerator:
     def on_log_toggle(self):
         """日志开关切换时的处理"""
         if self.log_to_file.get():
-            self.update_status("已启用日志记录（敏感信息已脱敏）")
+            os.makedirs("logs", exist_ok=True)
+            try:
+                target_script = os.path.join("logs", "export_images_from_log（从Log中提取图片）.py")
+                with open(target_script, "w", encoding="utf-8") as f:
+                    f.write(self.EXPORT_SCRIPT_CODE)
+                self.update_status("已启用日志记录（敏感信息已脱敏）- 已生成图片提取工具")
+            except Exception as e:
+                self.update_status(f"已启用日志记录，但生成提取工具失败: {str(e)}")
         else:
             self.update_status("已禁用日志记录")
 
-    def on_thinking_toggle(self):
-        """思考模式开关切换时的处理"""
-        if self.thinking_mode.get():
-            self.update_status("已启用思考模式")
-        else:
-            self.update_status("已禁用思考模式")
     # 模型切换处理
     def on_model_change(self, event=None):
         """模型切换时更新分辨率选项和思考模式状态"""
@@ -1307,15 +1358,10 @@ class GeminiImageGenerator:
         if config.get("stable"):  # gemini-2.5-flash-image
             self.resolution_combo.config(values=["1K"], state="readonly")
             self.resolution.set("1K")
-            # 禁用思考模式
-            self.thinking_check.config(state=tk.DISABLED)
-            self.thinking_mode.set(False)
         # Nano Banana 2 支持多分辨率
         else:  # gemini-3-pro-image-preview
             self.resolution_combo.config(values=["1K", "2K", "4K"], state="readonly")
             self.resolution.set("4K")  # 默认4K
-            # 启用思考模式
-            self.thinking_check.config(state=tk.NORMAL)
     # 缩放比例变化处理
     def on_zoom_change(self, event=None):
         self._apply_zoom()
@@ -1330,7 +1376,6 @@ class GeminiImageGenerator:
             'resolution': self.resolution.get(),
             'log_to_file': self.log_to_file.get(),
             'network_timeout': self.network_timeout.get(),
-            'thinking_mode': self.thinking_mode.get(),
             'reference_images': self.reference_images.copy(),
             'current_image_data': self.current_image_data,
             'last_raw_response': self.last_raw_response,
@@ -1351,7 +1396,6 @@ class GeminiImageGenerator:
         self.resolution.set(state['resolution'])
         self.log_to_file.set(state['log_to_file'])
         self.network_timeout.set(state['network_timeout'])
-        self.thinking_mode.set(state.get('thinking_mode', False))
 
         self.prompt_text.delete("1.0", tk.END)
         self.prompt_text.insert("1.0", state['prompt'])
@@ -1532,6 +1576,16 @@ class GeminiImageGenerator:
         return "break"  # 阻止事件继续传递，防止文本框获得焦点
 # ==================== 主程序入口 ====================
 def main():
+    # ========== 关键修复：切换到脚本所在目录 ==========
+    # 获取脚本文件的绝对路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"脚本所在目录: {script_dir}")
+    
+    # 切换到脚本所在目录
+    os.chdir(script_dir)
+    print(f"工作目录已切换到: {os.getcwd()}")
+    # ===================================================
+    
     root = tk.Tk()
     root.minsize(1000, 800)
     app = GeminiImageGenerator(root)
