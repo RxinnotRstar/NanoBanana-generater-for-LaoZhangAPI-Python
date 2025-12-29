@@ -554,9 +554,8 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 纵横比和分辨率选择
         ttk.Label(param_grid, text="纵横比:").grid(row=0, column=0, sticky=tk.W, padx=(0, 2))
         aspect_combo = ttk.Combobox(param_grid, textvariable=self.aspect_ratio,
-                                   values=["21:9", "16:9", "4:3", "3:2", "1:1", 
-                                           "9:16", "3:4", "2:3", "5:4", "4:5"],
-                                   state="readonly", width=5)
+                                   values=["16:9", "5:4", "4:3", "3:2", "", "1:1","21:9","", "2:3", "3:4", "4:5", "9:16"],    
+                                   state="readonly", width=5, height=9999)
         aspect_combo.grid(row=0, column=1, sticky=tk.W)
         # 分辨率选择
         ttk.Label(param_grid, text="分辨率:").grid(row=0, column=2, sticky=tk.W, padx=(10, 2))
@@ -864,6 +863,11 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         prompt = self.prompt_text.get("1.0", tk.END).strip()
         if not prompt:
             messagebox.showerror("错误", "提示词不能为空")
+            return
+        
+        # 验证纵横比是否已选择
+        if not self.aspect_ratio.get():
+            messagebox.showwarning("提示", "请选择比例")
             return
         
         # 检查是否存在大图片并二次警告
