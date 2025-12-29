@@ -354,6 +354,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 默认提示词行数设置
         self.line_count_var = tk.IntVar(value=5)
         
+        # 新增：代理警告抑制状态（临时，不持久化）
+        self.proxy_warning_suppressed = False
+        
         # 检测pywin32可用性（仅Windows平台）
         self.pywin32_available = False
         self._win32clipboard = None
@@ -726,6 +729,43 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             pass
 
     # ==================== 核心功能实现 ====================
+    # 检测系统代理状态
+    def _check_system_proxy(self):
+        """检测Windows系统代理状态（其他系统默认返回False）"""
+        system = platform.system()
+        
+        # Windows平台：通过注册表检测系统代理
+        if system == "Windows":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                import winreg
+                
+                # 打开注册表键值
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                   r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+                # 读取代理启用值
+                proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
+                winreg.CloseKey(key)
+                return proxy_enable == 1
+            except Exception:
+                return False
+        
+        # macOS平台预留接口（暂未实现）  
+        elif system == "Darwin":
+            # TODO: macOS系统代理检测实现
+            # 可通过networksetup或scutil命令检测
+            return False
+        
+        # Linux平台预留接口（暂未实现）
+        elif system == "Linux":
+            # TODO: Linux系统代理检测实现
+            # 可通过环境变量或gsettings检测
+            return False
+        
+        # 其他系统默认无代理
+        return False
+    
     # 获取当前模型的 API 端点
     def get_api_url(self):
         """获取当前模型的 API 端点"""
@@ -884,6 +924,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.update_status("用户取消生成")
                 return
         
+        # 新增：检测系统代理并提示（如果未抑制）
+        if not self.proxy_warning_suppressed and self._check_system_proxy():
+            if not self._show_proxy_warning_dialog():
+                self.update_status("用户取消生成（检测到代理启用）")
+                return
+        
         # 禁用生成按钮
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
         self.update_status("正在生成图片...")
@@ -1032,6 +1078,57 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # **改进：记录错误日志**
         if self.log_to_file.get():
             self._save_log({"error": error_msg, "exception": True}, "error")
+    
+    # 代理警告弹窗
+    def _show_proxy_warning_dialog(self):
+        """显示代理警告弹窗，返回用户是否选择继续"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("网络环境检测")
+        dialog.geometry("400x150")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        result = False
+        suppress_var = tk.BooleanVar(value=False)
+        
+        # 提示文本
+        message = "检测到您已开启系统代理，请确保网络环境稳定，否则图片会传输失败，无法续传。是否继续生成？"
+        label = tk.Label(dialog, text=message, wraplength=350, justify=tk.LEFT, padx=10, pady=10)
+        label.pack(fill=tk.X)
+        
+        # 复选框
+        check_btn = tk.Checkbutton(dialog, text="本次不再提示", variable=suppress_var)
+        check_btn.pack(pady=5)
+        
+        # 按钮区域
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        
+        def on_continue():
+            nonlocal result, suppress_var
+            result = True
+            self.proxy_warning_suppressed = suppress_var.get()
+            dialog.destroy()
+        
+        def on_cancel():
+            nonlocal result
+            result = False
+            dialog.destroy()
+        
+        continue_btn = tk.Button(btn_frame, text="继续生成", command=on_continue, width=12)
+        continue_btn.pack(side=tk.LEFT, padx=10)
+        
+        cancel_btn = tk.Button(btn_frame, text="取消", command=on_cancel, width=12)
+        cancel_btn.pack(side=tk.LEFT, padx=10)
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
+        y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        self.root.wait_window(dialog)
+        return result
     # 优化显示数据
     def _optimize_display_data(self, data, max_str_len=500):
         """**改进：统一处理数据优化，避免重复检测**"""
