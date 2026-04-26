@@ -256,6 +256,11 @@ class GeminiImageGenerator:
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
             "display_name": "最新版"
+        },
+        "gemini-3.1-flash-image-preview": {
+            "resolutions": ["1K", "2K", "4K"],
+            "stable": False,
+            "display_name": "最新版"
         }
     }
     
@@ -970,7 +975,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             }
             
             # Nano Banana 2 支持分辨率参数
-            if self.model_var.get() == "gemini-3-pro-image-preview":
+            if self.model_var.get() in ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]:
                 payload["generationConfig"]["imageConfig"]["imageSize"] = self.resolution.get()
             
             # 发送请求
