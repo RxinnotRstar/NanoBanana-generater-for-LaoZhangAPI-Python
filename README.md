@@ -51,6 +51,7 @@ pip install requests pillow
       可用模型复制下列模型名称并搜索和添加：
          gemini-3-pro-image-preview
          gemini-2.5-flash-image
+         gemini-3.1-flash-image-preview
       最后点“保存”和“确认保存”
    点击扳手图标左边两个的复制按钮，复制密钥
    ```
@@ -95,7 +96,7 @@ pip install requests pillow
 | 网络超时 | API 请求超时时间（秒） | 0=无限制，默认 1200 秒 |
 | 模型 | Gemini 模型版本 | 2.5（稳定）或 3（最新） |
 | 纵横比 | 输出图片宽高比 | 仅 Gemini 3 支持所有比例 |
-| 分辨率 | 输出图片尺寸 | 1K/2K/4K（仅 Gemini 3 支持 2K/4K） |
+| 分辨率 | 输出图片尺寸 | 1K/2K/4K（仅Gemini-3系列支持 2K/4K） |
 | 界面缩放 | UI 缩放比例 | 75%-500%，手动选择，默认100% |
 
 ## 注意事项
