@@ -411,6 +411,8 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.current_image_data = None
         # 当前生成的图片MIME类型
         self.current_image_mime_type = None
+        # 生成图片时使用的模型名（用于保存时确定文件名）
+        self.current_image_model = None
         # 当前生成的图片预览（PIL ImageTk 对象）
         self.current_image_preview = None
         # 最后一次的原始响应数据
@@ -1171,6 +1173,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 mime_type = candidate["content"]["parts"][0]["inlineData"].get("mimeType", "image/png")
                 self.current_image_data = image_data
                 self.current_image_mime_type = mime_type
+                self.current_image_model = self.model_var.get()  # 记录生成时使用的模型
                 
                 self._show_image()
                 
@@ -1244,6 +1247,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 
                 self.current_image_data = image_data
                 self.current_image_mime_type = "image/png"
+                self.current_image_model = self.model_var.get()  # 记录生成时使用的模型
                 
                 self._show_image()
                 
@@ -1408,14 +1412,18 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         }
         default_ext = mime_to_ext.get(self.current_image_mime_type, ".png")
         
-        # 生成默认文件名
+        # 生成默认文件名，使用生成图片时的模型名（而非当前下拉框选中的模型）
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backend = self.get_backend_type()
-        if backend == "gpt_image_vip":
+        # 优先使用生成时记录的模型，如果没有则回退到当前选中模型
+        saved_model = getattr(self, 'current_image_model', self.model_var.get())
+        saved_config = self.MODEL_CONFIGS.get(saved_model, {})
+        saved_backend = saved_config.get("backend", "nanobanana")
+        
+        if saved_backend == "gpt_image_vip":
             model_short = "vip"
             prefix = "gpt"
         else:
-            model_short = self.model_var.get().split("-")[1]  # "2.5" 或 "3"
+            model_short = saved_model.split("-")[1] if "-" in saved_model else saved_model
             prefix = "gemini"
         default_filename = f"{prefix}_{model_short}_{self.resolution.get()}_{timestamp}{default_ext}"
         
@@ -1710,6 +1718,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             'network_timeout': self.network_timeout.get(),
             'reference_images': self.reference_images.copy(),
             'current_image_data': self.current_image_data,
+            'current_image_model': getattr(self, 'current_image_model', None),
             'last_raw_response': self.last_raw_response,
             'response_text': self.response_text.get("1.0", tk.END).strip(),
             'status_text': self.status_text.get("1.0", tk.END).strip()
@@ -1745,6 +1754,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         self.current_image_data = state['current_image_data']
         self.current_image_mime_type = state.get('current_image_mime_type', 'image/png')
+        self.current_image_model = state.get('current_image_model', None)
         if self.current_image_data:
             self._show_image()
             self.save_btn.config(state=tk.NORMAL)
