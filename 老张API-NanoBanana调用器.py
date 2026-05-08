@@ -2,12 +2,11 @@
 #         警告：不要直接在顶部导入"第三方"依赖！
 # 请按照说明，使用正确的方法添加新的依赖，确保防呆机制生效
 # ====================================================
-import sys
+import sys 
 import platform
-import subprocess
-import time
-import os
-import shutil
+import subprocess 
+import time 
+import os 
 
 # ================ 依赖检查与自动安装模块 ================
 # 这是一个针对用户的防呆设计，可以自动检测并安装缺失的依赖
@@ -250,18 +249,45 @@ class GeminiImageGenerator:
         "gemini-2.5-flash-image": {
             "resolutions": ["1K"],
             "stable": True,
-            "display_name": "稳定版"
+            "display_name": "稳定版",
+            "backend": "nanobanana",
+            "max_ref_images": 14
         },
         "gemini-3-pro-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
-            "display_name": "最新版"
+            "display_name": "最新版",
+            "backend": "nanobanana",
+            "max_ref_images": 14
         },
         "gemini-3.1-flash-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
-            "display_name": "最新版"
+            "display_name": "最新版",
+            "backend": "nanobanana",
+            "max_ref_images": 14
+        },
+        "gpt-image-2-vip": {
+            "resolutions": ["1K", "2K", "4K"],
+            "stable": False,
+            "display_name": "GPT VIP",
+            "backend": "gpt_image_vip",
+            "max_ref_images": 5
         }
+    }
+
+    # GPT Image 2 VIP 纵横比到像素尺寸的映射
+    VIP_SIZE_MAP = {
+        "1:1":   {"1K": "1280x1280",  "2K": "2048x2048",  "4K": "2880x2880"},
+        "2:3":   {"1K": "848x1280",   "2K": "1360x2048",  "4K": "2336x3520"},
+        "3:2":   {"1K": "1280x848",   "2K": "2048x1360",  "4K": "3520x2336"},
+        "3:4":   {"1K": "960x1280",   "2K": "1536x2048",  "4K": "2480x3312"},
+        "4:3":   {"1K": "1280x960",   "2K": "2048x1536",  "4K": "3312x2480"},
+        "4:5":   {"1K": "1024x1280",  "2K": "1632x2048",  "4K": "2560x3216"},
+        "5:4":   {"1K": "1280x1024",  "2K": "2048x1632",  "4K": "3216x2560"},
+        "9:16":  {"1K": "720x1280",   "2K": "1152x2048",  "4K": "2160x3840"},
+        "16:9":  {"1K": "1280x720",   "2K": "2048x1152",  "4K": "3840x2160"},
+        "21:9":  {"1K": "1280x544",   "2K": "2048x864",   "4K": "3840x1632"}
     }
     
     # 嵌入的图片提取脚本代码
@@ -345,7 +371,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # self.api_key = tk.StringVar(value="sk-1234567890987654321")
         self.api_key = tk.StringVar(value="")
         # 默认模型选择
-        self.model_var = tk.StringVar(value="gemini-3-pro-image-preview")
+        self.model_var = tk.StringVar(value="gemini-3.1-flash-image-preview")
+        # 当前模式下的最大参考图片数（由模型决定）
+        self.current_max_ref_images = 14
         # 默认生成参数
         self.aspect_ratio = tk.StringVar(value="1:1")
         # 默认分辨率（取决于模型设置）
@@ -459,9 +487,13 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         api_frame = ttk.LabelFrame(left_panel, text="API配置", padding=10)
         api_frame.pack(fill=tk.X, pady=5, padx=5)
 
+        # 先计算模型下拉框的宽度，让API密钥输入框与之对齐
+        model_values = list(self.MODEL_CONFIGS.keys())
+        combo_width = max(len(v) for v in model_values) + 1 if model_values else 10
+        
         # API密钥输入（更改“show=”可以实现替换加密文本，别忘了更改下面的按钮里面的文本）
         ttk.Label(api_frame, text="API密钥:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=25)
+        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=combo_width)
         api_entry.grid(row=0, column=1, sticky=tk.W)
         self.api_key_entry = api_entry
         # 显示/隐藏API密钥按钮
@@ -478,11 +510,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 模型选择
         ttk.Label(api_frame, text="模型:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo = ttk.Combobox(api_frame, textvariable=self.model_var, 
-                                   values=list(self.MODEL_CONFIGS.keys()),
-                                   state="readonly", width=20)
+                                   values=model_values,
+                                   state="readonly", width=combo_width)
         # 绑定模型选择事件
         model_combo.grid(row=1, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo.bind("<<ComboboxSelected>>", self.on_model_change)
+        self.model_combo = model_combo
 
         
 
@@ -531,19 +564,19 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         update_char_count()
         
         # 参考图片区域
-        ref_frame = ttk.LabelFrame(left_panel, text=f"参考图片 (可选, 最多{self.MAX_REF_IMAGES}张)", padding=10)
-        ref_frame.pack(fill=tk.X, pady=5, padx=5)
+        self.ref_frame = ttk.LabelFrame(left_panel, text="参考图片 (可选)", padding=10)
+        self.ref_frame.pack(fill=tk.X, pady=5, padx=5)
         # 参考图片按钮和计数
-        ref_btn_frame = ttk.Frame(ref_frame)
+        ref_btn_frame = ttk.Frame(self.ref_frame)
         ref_btn_frame.pack(fill=tk.X)
         # 添加图片和清空按钮
         ttk.Button(ref_btn_frame, text="添加图片", command=self.add_images, width=12).pack(side=tk.LEFT)
         ttk.Button(ref_btn_frame, text="清空全部", command=self.clear_images, width=12).pack(side=tk.LEFT, padx=10)
         # 参考图片计数标签
-        self.ref_count_label = ttk.Label(ref_btn_frame, text=f"已选择: 0/{self.MAX_REF_IMAGES}张", font=("TkDefaultFont", 9, "bold"))
+        self.ref_count_label = ttk.Label(ref_btn_frame, text="已选择: 0/14张", font=("TkDefaultFont", 9, "bold"))
         self.ref_count_label.pack(side=tk.LEFT, padx=20)
         # 参考图片预览区域（带水平滚动条）
-        ref_canvas_container = ttk.Frame(ref_frame)
+        ref_canvas_container = ttk.Frame(self.ref_frame)
         ref_canvas_container.pack(fill=tk.X, pady=5, expand=True)
         # 参考图片Canvas
         self.ref_canvas = tk.Canvas(ref_canvas_container, height=100, bg="#f0f0f0", relief=tk.SUNKEN)
@@ -775,7 +808,18 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
     def get_api_url(self):
         """获取当前模型的 API 端点"""
         model_id = self.model_var.get()
+        config = self.MODEL_CONFIGS.get(model_id, {})
+        backend = config.get("backend", "nanobanana")
+        if backend == "gpt_image_vip":
+            return "https://api.laozhang.ai/v1"
         return f"https://api.laozhang.ai/v1beta/models/{model_id}:generateContent"
+
+    # 获取当前后端类型
+    def get_backend_type(self):
+        """获取当前模型的后端类型"""
+        model_id = self.model_var.get()
+        config = self.MODEL_CONFIGS.get(model_id, {})
+        return config.get("backend", "nanobanana")
     # 根据文件扩展名获取 MIME 类型
     def get_mime_type(self, filepath):
         """根据文件扩展名获取 MIME 类型"""
@@ -792,16 +836,20 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         """添加多张参考图片"""
         # 打开文件对话框选择图片
         filepaths = filedialog.askopenfilenames(
-            title="选择参考图片", # 这里是文件对话框的标题
-            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")] # 只允许选择图片文件
+            title="选择参考图片",
+            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")]
         )
         # 没有选择图片则返回
         if not filepaths:
             return
-        # 检查是否超过最大数量
-        available_slots = self.MAX_REF_IMAGES - len(self.reference_images)
-        if len(filepaths) > available_slots: 
-            messagebox.showwarning("警告", f"最多只能添加{self.MAX_REF_IMAGES}张参考图片，当前已选择{len(self.reference_images)}张")
+        # 检查是否超过当前模式的最大数量
+        available_slots = self.current_max_ref_images - len(self.reference_images)
+        if len(filepaths) > available_slots:
+            messagebox.showwarning(
+                "警告",
+                f"当前模型最多支持 {self.current_max_ref_images} 张参考图片，"
+                f"当前已选择 {len(self.reference_images)} 张，还可添加 {available_slots} 张"
+            )
             filepaths = filepaths[:available_slots]
         # 逐个处理选择的图片
         for filepath in filepaths:
@@ -830,6 +878,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 更新预览
         self.update_reference_preview()
         self.update_status(f"已添加 {len(filepaths)} 张参考图片")
+
+    def update_ref_count_label(self):
+        """更新参考图片计数标签"""
+        self.ref_count_label.config(
+            text=f"已选择: {len(self.reference_images)}/{self.current_max_ref_images}张"
+        )
 
     def update_reference_preview(self):
         """更新参考图片预览"""
@@ -878,7 +932,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 更新滚动区域
         self.ref_canvas.config(scrollregion=(0, 0, x_offset, thumb_size + 10))
-        self.ref_count_label.config(text=f"已选择: {len(self.reference_images)}/{self.MAX_REF_IMAGES}张")
+        self.update_ref_count_label()
     # 删除参考图片
     def remove_reference(self, index):
         """删除指定参考图片"""
@@ -939,21 +993,29 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
         self.update_status("正在生成图片...")
         
-        # 在后台线程中执行
-        self.generate_thread = threading.Thread(
-            target=self._generate_thread,
-            args=(self.api_key.get(), prompt),
-            daemon=True
-        )
+        # 根据后端类型选择线程函数
+        backend = self.get_backend_type()
+        if backend == "gpt_image_vip":
+            self.generate_thread = threading.Thread(
+                target=self._generate_thread_gpt_vip,
+                args=(self.api_key.get(), prompt),
+                daemon=True
+            )
+        else:
+            self.generate_thread = threading.Thread(
+                target=self._generate_thread,
+                args=(self.api_key.get(), prompt),
+                daemon=True
+            )
         self.generate_thread.start()
-    # 后台线程生成图片
+    # 后台线程生成图片 (NanoBanana)
     def _generate_thread(self, api_key, prompt):
-        """后台线程执行API调用"""
+        """后台线程执行NanoBanana API调用"""
         try:
             # 构建请求数据
             parts = [{"text": prompt}]
             
-            # 添加参考图片 - 修复：改为4项解包（文件路径、base64、mime_type、原始PIL图像）
+            # 添加参考图片
             for filepath, image_b64, mime_type, original_img in self.reference_images:
                 parts.append({
                     "inline_data": {
@@ -967,7 +1029,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                     "parts": parts
                 }],
                 "generationConfig": {
-                    "responseModalities": ["IMAGE"],################################################################################################################################
+                    "responseModalities": ["IMAGE"],
                     "imageConfig": {
                         "aspectRatio": self.aspect_ratio.get()
                     }
@@ -997,32 +1059,93 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             
             # 在主线程中处理响应
             self.root.after(0, self._handle_response, response)
-        # 捕获异常并在主线程中处理
         except Exception as e:
             self.root.after(0, self._handle_error, str(e))
-    # 处理API响应
+
+    # 后台线程生成图片 (GPT Image 2 VIP)
+    def _generate_thread_gpt_vip(self, api_key, prompt):
+        """后台线程执行GPT Image 2 VIP API调用"""
+        try:
+            # 获取超时设置
+            timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
+            timeout = None if timeout_val == 0 else timeout_val
+            
+            # 计算size参数
+            aspect = self.aspect_ratio.get()
+            resolution = self.resolution.get()
+            size = self.VIP_SIZE_MAP.get(aspect, {}).get(resolution, "2048x2048")
+            
+            base_url = self.get_api_url()
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+            
+            # 有参考图片时调用 edits，否则调用 generations
+            if self.reference_images:
+                # 图改图：使用 multipart/form-data
+                url = f"{base_url}/images/edits"
+                files = []
+                data = {
+                    "model": "gpt-image-2-vip",
+                    "prompt": prompt,
+                    "size": size
+                }
+                # GPT VIP edits 只支持单张图片，取第一张
+                filepath, _, mime_type, _ = self.reference_images[0]
+                files.append(("image", (os.path.basename(filepath), open(filepath, "rb"), mime_type)))
+                
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    data=data,
+                    files=files,
+                    timeout=timeout
+                )
+                
+                # 关闭文件句柄
+                for _, file_tuple in files:
+                    file_tuple[1].close()
+            else:
+                # 文生图：使用 JSON
+                url = f"{base_url}/images/generations"
+                payload = {
+                    "model": "gpt-image-2-vip",
+                    "prompt": prompt,
+                    "size": size
+                }
+                
+                response = requests.post(
+                    url,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=timeout
+                )
+            
+            # 在主线程中处理响应
+            self.root.after(0, self._handle_response_gpt_vip, response)
+        except Exception as e:
+            self.root.after(0, self._handle_error, str(e))
+    # 处理API响应 (NanoBanana)
     def _handle_response(self, response):
-        """处理API响应"""
+        """处理NanoBanana API响应"""
         try:
             # 检查HTTP状态码
             if response.status_code != 200:
                 error_msg = f"HTTP错误 {response.status_code}: {response.text}"
                 messagebox.showerror("API错误", error_msg)
                 self.update_status(f"生成失败: HTTP {response.status_code}")
-                # **改进：记录错误日志**
                 if self.log_to_file.get():
                     self._save_log({"error": error_msg, "status_code": response.status_code}, "error")
                 return
             # 解析JSON响应
             result = response.json()
-            self.last_raw_response = result  # 保存原始响应
+            self.last_raw_response = result
             
             # 检查API错误
             if "error" in result:
                 error_msg = result["error"].get("message", str(result["error"]))
                 messagebox.showerror("API错误", error_msg)
                 self.update_status("生成失败: API错误")
-                # **改进：记录错误日志**
                 if self.log_to_file.get():
                     self._save_log({"error": error_msg, "raw_response": result}, "error")
                 return
@@ -1040,7 +1163,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                         f"内容生成失败，finishReason: {finish_reason}\n"
                         f"安全评级: {safety_ratings}"
                     )
-                # 提取图片Base64数据
+                
                 if "parts" not in candidate["content"] or not candidate["content"]["parts"]:
                     raise ValueError("响应中未找到图片数据")
                 
@@ -1049,10 +1172,8 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.current_image_data = image_data
                 self.current_image_mime_type = mime_type
                 
-                # 显示图片
                 self._show_image()
                 
-                # 优化显示数据
                 display_data = self._optimize_display_data(result)
                 self.response_text.delete("1.0", tk.END)
                 self.response_text.insert("1.0", json.dumps(display_data, indent=2, ensure_ascii=False))
@@ -1061,16 +1182,86 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.copy_btn.config(state=tk.NORMAL)
                 self.update_status("生成成功")
                 
-                # 记录日志
                 if self.log_to_file.get():
                     self._save_log(result, "success")
-            # 捕获解析错误
             except (KeyError, IndexError, ValueError) as e:
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
                 self.response_text.insert("1.0", json.dumps(result, indent=2, ensure_ascii=False))
                 self.update_status(f"生成失败: {str(e)[:50]}...")
-        # 捕获异常并提示
+        finally:
+            self.generate_btn.config(state=tk.NORMAL, text="生成图片")
+
+    # 处理API响应 (GPT Image 2 VIP)
+    def _handle_response_gpt_vip(self, response):
+        """处理GPT Image 2 VIP API响应"""
+        try:
+            # 检查HTTP状态码
+            if response.status_code != 200:
+                error_msg = f"HTTP错误 {response.status_code}: {response.text}"
+                messagebox.showerror("API错误", error_msg)
+                self.update_status(f"生成失败: HTTP {response.status_code}")
+                if self.log_to_file.get():
+                    self._save_log({"error": error_msg, "status_code": response.status_code}, "error")
+                return
+            
+            # 解析JSON响应
+            result = response.json()
+            self.last_raw_response = result
+            
+            # 检查API错误
+            if "error" in result:
+                error_msg = result["error"].get("message", str(result["error"]))
+                messagebox.showerror("API错误", error_msg)
+                self.update_status("生成失败: API错误")
+                if self.log_to_file.get():
+                    self._save_log({"error": error_msg, "raw_response": result}, "error")
+                return
+            
+            # 提取图片数据
+            try:
+                if "data" not in result or not result["data"]:
+                    raise ValueError("响应中未找到 data 数据")
+                
+                image_item = result["data"][0]
+                
+                # 优先使用 b64_json
+                if "b64_json" in image_item and image_item["b64_json"]:
+                    image_data = image_item["b64_json"]
+                    # 处理可能的前缀
+                    if image_data.startswith("data:"):
+                        image_data = image_data.split(",", 1)[1]
+                    # 补齐padding
+                    image_data += "=" * ((4 - len(image_data) % 4) % 4)
+                elif "url" in image_item and image_item["url"]:
+                    # 如果是URL，下载图片
+                    self.update_status("检测到URL返回，正在下载图片...")
+                    img_response = requests.get(image_item["url"], timeout=60)
+                    img_response.raise_for_status()
+                    image_data = base64.b64encode(img_response.content).decode("utf-8")
+                else:
+                    raise ValueError("响应中未找到图片数据（b64_json 或 url）")
+                
+                self.current_image_data = image_data
+                self.current_image_mime_type = "image/png"
+                
+                self._show_image()
+                
+                display_data = self._optimize_display_data(result)
+                self.response_text.delete("1.0", tk.END)
+                self.response_text.insert("1.0", json.dumps(display_data, indent=2, ensure_ascii=False))
+                
+                self.save_btn.config(state=tk.NORMAL)
+                self.copy_btn.config(state=tk.NORMAL)
+                self.update_status("生成成功")
+                
+                if self.log_to_file.get():
+                    self._save_log(result, "success")
+            except (KeyError, IndexError, ValueError) as e:
+                messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
+                self.response_text.delete("1.0", tk.END)
+                self.response_text.insert("1.0", json.dumps(result, indent=2, ensure_ascii=False))
+                self.update_status(f"生成失败: {str(e)[:50]}...")
         finally:
             self.generate_btn.config(state=tk.NORMAL, text="生成图片")
     # 处理异常错误
@@ -1219,8 +1410,14 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 生成默认文件名
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_short = self.model_var.get().split("-")[1]  # "2.5" 或 "3"
-        default_filename = f"gemini_{model_short}_{self.resolution.get()}_{timestamp}{default_ext}"
+        backend = self.get_backend_type()
+        if backend == "gpt_image_vip":
+            model_short = "vip"
+            prefix = "gpt"
+        else:
+            model_short = self.model_var.get().split("-")[1]  # "2.5" 或 "3"
+            prefix = "gemini"
+        default_filename = f"{prefix}_{model_short}_{self.resolution.get()}_{timestamp}{default_ext}"
         
         # 设置文件类型选项
         if self.current_image_mime_type == "image/jpeg":
@@ -1419,12 +1616,13 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             log_data = {
                 "timestamp": timestamp,
                 "model": self.model_var.get(),
+                "backend": self.get_backend_type(),
                 "prompt": self.prompt_text.get("1.0", tk.END).strip(),
                 "aspect_ratio": self.aspect_ratio.get(),
                 "resolution": self.resolution.get(),
                 "network_timeout": self.network_timeout.get(),
                 "reference_images": len(self.reference_images),
-                "api_key": hidden_api_key,  # 修复：使用占位符代替真实密钥
+                "api_key": hidden_api_key,
                 "data": data
             }
             # 保存日志文件
@@ -1456,21 +1654,49 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
 
     # 模型切换处理
     def on_model_change(self, event=None):
-        """模型切换时更新分辨率选项和思考模式状态"""
+        """模型切换时更新分辨率选项、参考图片上限和界面状态"""
         model = self.model_var.get().strip()
         config = self.MODEL_CONFIGS.get(model, {})
+        backend = config.get("backend", "nanobanana")
+        # 更新参考图片上限
+        self.current_max_ref_images = config.get("max_ref_images", 14)
+        # 更新参考图片区域标题和计数显示
+        self.ref_frame.config(text=f"参考图片 (可选, 最多{self.current_max_ref_images}张)")
+        self.update_ref_count_label()
+        # 如果当前已选图片超过新上限，提示用户
+        if len(self.reference_images) > self.current_max_ref_images:
+            excess = len(self.reference_images) - self.current_max_ref_images
+            messagebox.showwarning(
+                "参考图片超限",
+                f"当前模型最多支持 {self.current_max_ref_images} 张参考图片，\n"
+                f"将自动移除多余的 {excess} 张图片（从最后一张开始）。"
+            )
+            self.reference_images = self.reference_images[:self.current_max_ref_images]
+            self.update_reference_preview()
         # 根据模型配置更新分辨率选项
-        # Gemini 2.5 仅支持 1K，Gemini 3 Pro 支持多分辨率
         if config.get("stable"):  # gemini-2.5-flash-image
             self.resolution_combo.config(values=["1K"], state="readonly")
             self.resolution.set("1K")
-        # Nano Banana 2 支持多分辨率
-        else:  # gemini-3-pro-image-preview
+        else:
             self.resolution_combo.config(values=["1K", "2K", "4K"], state="readonly")
             self.resolution.set("4K")  # 默认4K
     # 缩放比例变化处理
     def on_zoom_change(self, event=None):
         self._apply_zoom()
+        # 同步更新模型下拉框宽度以确保始终适配内容
+        self._update_model_combo_width()
+
+    def _update_model_combo_width(self):
+        """根据当前模型选项列表更新下拉框宽度"""
+        if hasattr(self, 'model_combo'):
+            values = self.model_combo.cget("values")
+            if values:
+                max_len = max(len(str(v)) for v in values)
+                new_width = max_len + 1
+                self.model_combo.config(width=new_width)
+                # 同步更新API密钥输入框宽度以保持对齐
+                if hasattr(self, 'api_key_entry'):
+                    self.api_key_entry.config(width=new_width)
     # 保存UI状态
     def _save_ui_state(self):
         """保存所有UI状态以便缩放后恢复"""
