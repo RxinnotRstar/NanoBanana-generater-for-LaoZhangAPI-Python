@@ -386,6 +386,8 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.zoom_var = tk.StringVar(value="100%")
         # 默认提示词行数设置
         self.line_count_var = tk.IntVar(value=5)
+        # 生成前确认参数开关
+        self.confirm_before_generate = tk.BooleanVar(value=True)
         
         # 新增：代理警告抑制状态（临时，不持久化）
         self.proxy_warning_suppressed = False
@@ -605,6 +607,10 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.resolution_combo = ttk.Combobox(param_grid, textvariable=self.resolution,
                                             values=["1K"], state="readonly", width=5)
         self.resolution_combo.grid(row=0, column=3, sticky=tk.W)
+
+        # 每次生成前确认参数
+        self.confirm_before_generate = tk.BooleanVar(value=True)
+        ttk.Checkbutton(param_grid, text="生成前确认", variable=self.confirm_before_generate).grid(row=0, column=4, sticky=tk.W, padx=(10, 0))
 
         # 生成按钮（底部，自动调整大小）
         self.generate_btn = ttk.Button(param_frame, text="生成图片", 
@@ -971,6 +977,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             messagebox.showwarning("提示", "请选择比例")
             return
         
+        # 生成前参数确认弹窗（优先于代理检测）
+        if self.confirm_before_generate.get():
+            if not self._show_param_confirm_dialog():
+                self.update_status("用户取消生成（参数确认未通过）")
+                return
+        
         # 检查是否存在大图片并二次警告
         large_images = []
         for filepath, _, _, _ in self.reference_images:
@@ -1279,6 +1291,96 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         if self.log_to_file.get():
             self._save_log({"error": error_msg, "exception": True}, "error")
     
+    # 参数确认弹窗
+    def _show_param_confirm_dialog(self):
+        """显示生成前参数确认弹窗，返回用户是否通过验证"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("参数确认")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(True, True)
+        # 绑定Esc关闭弹窗（视为取消/返回）
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+        
+        # 根据主窗口当前大小动态计算弹窗尺寸
+        root_width = self.root.winfo_width()
+        root_height = self.root.winfo_height()
+        dialog_width = max(320, int(root_width * 0.35))
+        dialog_height = max(240, int(root_height * 0.30))
+        dialog.geometry(f"{dialog_width}x{dialog_height}")
+        
+        result = False
+        
+        # 获取当前参数
+        model = self.model_var.get()
+        aspect = self.aspect_ratio.get()
+        resolution = self.resolution.get()
+        
+        # 随机选择要验证的参数项
+        import random
+        verify_target = random.choice(["分辨率", "纵横比", "模型"])
+        
+        # 构建显示文案
+        info_text = f"模型：{model}\n纵横比：{aspect}     分辨率：{resolution}"
+        question_text = f"请选择正确的{verify_target}以继续生成："
+        
+        # 生成正确和错误选项
+        if verify_target == "分辨率":
+            correct_answer = resolution
+            wrong_candidates = [r for r in ["1K", "2K", "4K"] if r != resolution]
+            wrong_answer = random.choice(wrong_candidates) if wrong_candidates else "8K"
+        elif verify_target == "纵横比":
+            correct_answer = aspect
+            all_aspects = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+            wrong_candidates = [a for a in all_aspects if a != aspect]
+            wrong_answer = random.choice(wrong_candidates) if wrong_candidates else "1:2"
+        else:  # 模型
+            correct_answer = model
+            all_models = list(self.MODEL_CONFIGS.keys())
+            wrong_candidates = [m for m in all_models if m != model]
+            wrong_answer = random.choice(wrong_candidates) if wrong_candidates else "unknown-model"
+        
+        # 随机打乱正确和错误的位置
+        answers = [(correct_answer, True), (wrong_answer, False)]
+        random.shuffle(answers)
+        
+        # 标题和信息
+        tk.Label(dialog, text="参数确认", font=("TkDefaultFont", 12, "bold")).pack(pady=(10, 5))
+        tk.Label(dialog, text=info_text, justify=tk.LEFT).pack(pady=5, padx=20)
+        tk.Label(dialog, text=question_text, justify=tk.LEFT).pack(pady=(10, 5), padx=20)
+        
+        # 答案按钮区域
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=5, padx=20, fill=tk.X)
+        
+        def on_answer(is_correct):
+            nonlocal result
+            if is_correct:
+                result = True
+                dialog.destroy()
+            else:
+                dialog.destroy()
+                messagebox.showerror("参数不一致", "参数不一致！请检查参数后重新生成。")
+                result = False
+        
+        # 两个答案按钮（长条）
+        for answer_text, is_correct in answers:
+            btn = ttk.Button(btn_frame, text=answer_text, command=lambda c=is_correct: on_answer(c))
+            btn.pack(fill=tk.X, pady=3)
+        
+        # 返回按钮
+        back_btn = ttk.Button(dialog, text="返回", command=dialog.destroy)
+        back_btn.pack(fill=tk.X, pady=(5, 10), padx=20)
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
+        y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        self.root.wait_window(dialog)
+        return result
+
     # 代理警告弹窗
     def _show_proxy_warning_dialog(self):
         """显示代理警告弹窗，返回用户是否选择继续"""
@@ -1287,6 +1389,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         dialog.geometry("400x150")
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.resizable(True, True)
+        # 绑定Esc关闭弹窗
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
         
         result = False
         suppress_var = tk.BooleanVar(value=False)
@@ -1315,10 +1420,10 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             result = False
             dialog.destroy()
         
-        continue_btn = tk.Button(btn_frame, text="继续生成", command=on_continue, width=12)
+        continue_btn = ttk.Button(btn_frame, text="继续生成", command=on_continue, width=12)
         continue_btn.pack(side=tk.LEFT, padx=10)
         
-        cancel_btn = tk.Button(btn_frame, text="取消", command=on_cancel, width=12)
+        cancel_btn = ttk.Button(btn_frame, text="取消", command=on_cancel, width=12)
         cancel_btn.pack(side=tk.LEFT, padx=10)
         
         # 居中显示
@@ -1593,6 +1698,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         detail_window = tk.Toplevel(self.root)
         detail_window.title("完整响应数据")
         detail_window.geometry("800x600")
+        detail_window.resizable(True, True)
+        # 绑定Esc关闭弹窗
+        detail_window.bind("<Escape>", lambda e: detail_window.destroy())
         # 文本区域（带滚动条）
         text_widget = tk.Text(detail_window, wrap=tk.NONE, font=("Consolas", 9))
         text_widget.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
@@ -1716,6 +1824,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             'resolution': self.resolution.get(),
             'log_to_file': self.log_to_file.get(),
             'network_timeout': self.network_timeout.get(),
+            'confirm_before_generate': self.confirm_before_generate.get(),
             'reference_images': self.reference_images.copy(),
             'current_image_data': self.current_image_data,
             'current_image_model': getattr(self, 'current_image_model', None),
@@ -1749,6 +1858,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.status_text.insert("1.0", state.get('status_text', ''))
         self.status_text.config(state=tk.DISABLED)
         
+        self.confirm_before_generate.set(state.get('confirm_before_generate', True))
         self.reference_images = state['reference_images']
         self.update_reference_preview()
         
