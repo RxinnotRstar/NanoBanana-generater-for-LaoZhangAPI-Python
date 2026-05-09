@@ -423,6 +423,8 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self._ui_state_cache = {}
         # 线程控制
         self.generate_thread = None
+        # 记录上一次通过验证的参数组合（模型, 纵横比, 分辨率）
+        self.last_verified_params = None
 
         # 构建UI
         self.setup_ui()
@@ -977,11 +979,30 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             messagebox.showwarning("提示", "请选择比例")
             return
         
+        # 检查参考图片文件是否存在
+        missing_files = []
+        for filepath, _, _, _ in self.reference_images:
+            if not os.path.exists(filepath):
+                missing_files.append(filepath)
+        if missing_files:
+            missing_names = "\n".join(os.path.basename(p) for p in missing_files)
+            messagebox.showerror("文件错误", f"以下参考图片文件不存在或已被移动/重命名：\n{missing_names}\n\n请重新添加这些图片。")
+            self.update_status("生成失败：参考图片文件缺失")
+            return
+
         # 生成前参数确认弹窗（优先于代理检测）
         if self.confirm_before_generate.get():
-            if not self._show_param_confirm_dialog():
-                self.update_status("用户取消生成（参数确认未通过）")
-                return
+            current_params = (self.model_var.get(), self.aspect_ratio.get(), self.resolution.get())
+            if current_params == self.last_verified_params:
+                self.update_status("参数未变化，跳过确认")
+            else:
+                if not self._show_param_confirm_dialog():
+                    self.update_status("用户取消生成（参数确认未通过）")
+                    return
+                self.last_verified_params = current_params
+        else:
+            # 关闭总开关时清空已验证记录，避免下次开启后错误跳过
+            self.last_verified_params = None
         
         # 检查是否存在大图片并二次警告
         large_images = []
@@ -1322,7 +1343,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 构建显示文案
         info_text = f"模型：{model}\n纵横比：{aspect}     分辨率：{resolution}"
-        question_text = f"请选择正确的{verify_target}以继续生成："
+        question_text = f"请选择正确的{verify_target}以继续生成：\n如果下一次生成时参数未改变，本窗口将不出现，直到改变参数。"
         
         # 生成正确和错误选项
         if verify_target == "分辨率":
@@ -1526,7 +1547,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         if saved_backend == "gpt_image_vip":
             model_short = "vip"
-            prefix = "gpt"
+            prefix = "gpt_images2"
         else:
             model_short = saved_model.split("-")[1] if "-" in saved_model else saved_model
             prefix = "gemini"
