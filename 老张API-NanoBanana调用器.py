@@ -249,30 +249,26 @@ class GeminiImageGenerator:
         "gemini-2.5-flash-image": {
             "resolutions": ["1K"],
             "stable": True,
-            "display_name": "稳定版",
             "backend": "nanobanana",
             "max_ref_images": 14
         },
         "gemini-3-pro-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
-            "display_name": "最新版",
             "backend": "nanobanana",
             "max_ref_images": 14
         },
         "gemini-3.1-flash-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
-            "display_name": "最新版",
             "backend": "nanobanana",
             "max_ref_images": 14
         },
         "gpt-image-2-vip": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
-            "display_name": "GPT VIP",
             "backend": "gpt_image_vip",
-            "max_ref_images": 5
+            "max_ref_images": 10
         }
     }
 
@@ -314,20 +310,34 @@ class V:
   if not p:return
   self.i.config(text="正在加载文件...",fg="orange");self.r.update()
   try:
-   with open(p,'r',encoding='utf-8')as f:d=json.load(f);b=self.x(d)
+   with open(p,'r',encoding='utf-8')as f:d=json.load(f);b,ext=self.x(d)
    if b:
     self.b=b;self.d=Image.open(io.BytesIO(b));self.s=0;self.t=None;self.c=None
-    self.n=f"image_{d.get('timestamp','unknown')}.jpg"
+    log_name=p.split('/')[-1].rsplit('.',1)[0]if'.'in p.split('/')[-1]else p.split('/')[-1]
+    self.n=f"{log_name}{ext}"
     self.u(self.a.winfo_width(),self.a.winfo_height())
     self.g.config(text=f"已加载: {p.split('/')[-1]}");self.e.config(state=tk.NORMAL);self.h.config(state=tk.NORMAL);self.i.config(fg="blue")
    else:mb.showwarning("警告","未找到有效的图片数据");self.i.config(text="未找到图片数据",fg="red")
   except Exception as e:mb.showerror("错误",f"加载失败: {str(e)}");self.i.config(text="加载失败",fg="red")
  def x(self,d):
-  for c in d.get("data",{}).get("candidates",[]):
+  inner = d.get("data", d)
+  for c in inner.get("candidates",[]):
    for p in c.get("content",{}).get("parts",[]):
     i=p.get("inlineData",{})
-    if i.get("mimeType")=="image/jpeg"and i.get("data"):return base64.b64decode(i["data"])
-  return None
+    if i.get("data"):
+     mime=i.get("mimeType","image/jpeg")
+     ext=".jpg" if "jpeg" in mime or "jpg" in mime else ".png"
+     return base64.b64decode(i["data"]), ext
+  data_arr=inner.get("data",[])
+  if data_arr and isinstance(data_arr,list) and len(data_arr)>0:
+   item=data_arr[0]
+   b64=item.get("b64_json") or item.get("b64")
+   if b64:
+    if b64.startswith("data:"):
+     b64=b64.split(",",1)[1]
+    b64+="="*((4-len(b64)%4)%4)
+    return base64.b64decode(b64), ".png"
+  return None, None
  def u(self,w,h):
   if not self.d:return
   if self.t is None:
@@ -345,7 +355,8 @@ class V:
  def o(self):self.s=(self.s+90)%360;self.t=None;self.c=None;self.u(self.a.winfo_width(),self.a.winfo_height())
  def v(self):
   if not self.b:return
-  p=fd.asksaveasfilename(defaultextension=".jpg",filetypes=[("JPEG文件","*.jpg"),("PNG文件","*.png"),("所有文件","*.*")],initialfile=self.n or"export_image.jpg")
+  ext=self.n.split('.')[-1] if self.n and '.' in self.n else 'png'
+  p=fd.asksaveasfilename(defaultextension=f".{ext}",filetypes=[("图片文件",f"*.{ext}"),("所有文件","*.*")],initialfile=self.n or f"export_image.{ext}")
   if not p:return
   try:open(p,'wb').write(self.b);mb.showinfo("成功",f"图片已保存: {p}")
   except Exception as e:mb.showerror("错误",f"保存失败: {str(e)}")
@@ -861,6 +872,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 f"当前已选择 {len(self.reference_images)} 张，还可添加 {available_slots} 张"
             )
             filepaths = filepaths[:available_slots]
+        added_count = 0
         # 逐个处理选择的图片
         for filepath in filepaths:
             try:
@@ -881,13 +893,13 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 original_img = Image.open(filepath)
                 # 存储：文件路径, base64, mime类型, 原始PIL图像
                 self.reference_images.append((filepath, image_b64, mime_type, original_img))
-                
+                added_count += 1
             # 捕获异常并提示
             except Exception as e:
                 messagebox.showerror("错误", f"加载图片失败: {filepath}\n{str(e)}")
         # 更新预览
         self.update_reference_preview()
-        self.update_status(f"已添加 {len(filepaths)} 张参考图片")
+        self.update_status(f"已添加 {added_count} 张参考图片")
 
     def update_ref_count_label(self):
         """更新参考图片计数标签"""
@@ -1085,17 +1097,23 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
             timeout = None if timeout_val == 0 else timeout_val
             
+            full_url = self.get_api_url()
             response = requests.post(
-                self.get_api_url(),
+                full_url,
                 headers=headers,
                 json=payload,
                 timeout=timeout
             )
             
+            # 确定实际发送的 imageSize（stable 模型不发送）
+            actual_image_size = None
+            if self.model_var.get() in ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]:
+                actual_image_size = self.resolution.get()
+            
             # 在主线程中处理响应
-            self.root.after(0, self._handle_response, response)
+            self.root.after(0, self._handle_response, response, full_url, actual_image_size)
         except Exception as e:
-            self.root.after(0, self._handle_error, str(e))
+            self.root.after(0, self._handle_error, str(e), full_url)
 
     # 后台线程生成图片 (GPT Image 2 VIP)
     def _generate_thread_gpt_vip(self, api_key, prompt):
@@ -1115,22 +1133,23 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 "Authorization": f"Bearer {api_key}"
             }
             
+            full_url = None
             # 有参考图片时调用 edits，否则调用 generations
             if self.reference_images:
                 # 图改图：使用 multipart/form-data
-                url = f"{base_url}/images/edits"
+                full_url = f"{base_url}/images/edits"
                 files = []
                 data = {
                     "model": "gpt-image-2-vip",
                     "prompt": prompt,
                     "size": size
                 }
-                # GPT VIP edits 只支持单张图片，取第一张
-                filepath, _, mime_type, _ = self.reference_images[0]
-                files.append(("image", (os.path.basename(filepath), open(filepath, "rb"), mime_type)))
+                # 发送所有参考图片
+                for filepath, _, mime_type, _ in self.reference_images:
+                    files.append(("image", (os.path.basename(filepath), open(filepath, "rb"), mime_type)))
                 
                 response = requests.post(
-                    url,
+                    full_url,
                     headers=headers,
                     data=data,
                     files=files,
@@ -1142,7 +1161,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                     file_tuple[1].close()
             else:
                 # 文生图：使用 JSON
-                url = f"{base_url}/images/generations"
+                full_url = f"{base_url}/images/generations"
                 payload = {
                     "model": "gpt-image-2-vip",
                     "prompt": prompt,
@@ -1150,18 +1169,21 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 }
                 
                 response = requests.post(
-                    url,
+                    full_url,
                     headers={**headers, "Content-Type": "application/json"},
                     json=payload,
                     timeout=timeout
                 )
             
+            # 确定 GPT 调用类型
+            gpt_endpoint_type = "edits" if self.reference_images else "generations"
+            
             # 在主线程中处理响应
-            self.root.after(0, self._handle_response_gpt_vip, response)
+            self.root.after(0, self._handle_response_gpt_vip, response, full_url, gpt_endpoint_type)
         except Exception as e:
-            self.root.after(0, self._handle_error, str(e))
+            self.root.after(0, self._handle_error, str(e), full_url if full_url else base_url)
     # 处理API响应 (NanoBanana)
-    def _handle_response(self, response):
+    def _handle_response(self, response, url=None, actual_image_size=None):
         """处理NanoBanana API响应"""
         try:
             # 检查HTTP状态码
@@ -1170,7 +1192,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status(f"生成失败: HTTP {response.status_code}")
                 if self.log_to_file.get():
-                    self._save_log({"error": error_msg, "status_code": response.status_code}, "error")
+                    self._save_log({"error": error_msg, "status_code": response.status_code}, "error", url=url, actual_image_size=actual_image_size)
                 return
             # 解析JSON响应
             result = response.json()
@@ -1182,7 +1204,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status("生成失败: API错误")
                 if self.log_to_file.get():
-                    self._save_log({"error": error_msg, "raw_response": result}, "error")
+                    self._save_log({"error": error_msg, "raw_response": result}, "error", url=url, actual_image_size=actual_image_size)
                 return
             
             # 提取图片数据
@@ -1219,7 +1241,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.update_status("生成成功")
                 
                 if self.log_to_file.get():
-                    self._save_log(result, "success")
+                    self._save_log(result, "success", url=url, actual_image_size=actual_image_size)
             except (KeyError, IndexError, ValueError) as e:
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
@@ -1229,7 +1251,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             self.generate_btn.config(state=tk.NORMAL, text="生成图片")
 
     # 处理API响应 (GPT Image 2 VIP)
-    def _handle_response_gpt_vip(self, response):
+    def _handle_response_gpt_vip(self, response, url=None, gpt_endpoint_type=None):
         """处理GPT Image 2 VIP API响应"""
         try:
             # 检查HTTP状态码
@@ -1238,7 +1260,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status(f"生成失败: HTTP {response.status_code}")
                 if self.log_to_file.get():
-                    self._save_log({"error": error_msg, "status_code": response.status_code}, "error")
+                    self._save_log({"error": error_msg, "status_code": response.status_code}, "error", url=url, gpt_endpoint_type=gpt_endpoint_type)
                 return
             
             # 解析JSON响应
@@ -1251,7 +1273,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status("生成失败: API错误")
                 if self.log_to_file.get():
-                    self._save_log({"error": error_msg, "raw_response": result}, "error")
+                    self._save_log({"error": error_msg, "raw_response": result}, "error", url=url, gpt_endpoint_type=gpt_endpoint_type)
                 return
             
             # 提取图片数据
@@ -1293,7 +1315,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.update_status("生成成功")
                 
                 if self.log_to_file.get():
-                    self._save_log(result, "success")
+                    self._save_log(result, "success", url=url, gpt_endpoint_type=gpt_endpoint_type)
             except (KeyError, IndexError, ValueError) as e:
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
@@ -1302,7 +1324,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         finally:
             self.generate_btn.config(state=tk.NORMAL, text="生成图片")
     # 处理异常错误
-    def _handle_error(self, error_msg):
+    def _handle_error(self, error_msg, url=None):
         """处理异常错误"""
         messagebox.showerror("错误", f"生成过程中发生异常:\n{error_msg}")
         self.update_status("生成失败: 异常错误")
@@ -1310,7 +1332,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # **改进：记录错误日志**
         if self.log_to_file.get():
-            self._save_log({"error": error_msg, "exception": True}, "error")
+            self._save_log({"error": error_msg, "exception": True}, "error", url=url)
     
     # 参数确认弹窗
     def _show_param_confirm_dialog(self):
@@ -1738,30 +1760,60 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         text_widget.insert("1.0", json.dumps(self.last_raw_response, indent=2, ensure_ascii=False))
         text_widget.config(state=tk.DISABLED)
     # 保存日志到文件
-    def _save_log(self, data, log_type):
+    def _save_log(self, data, log_type, url=None, actual_image_size=None, gpt_endpoint_type=None):
         """保存日志到文件"""
         try:
             log_dir = "logs"
             os.makedirs(log_dir, exist_ok=True)
+            
+            # 获取当前模型信息
+            model = self.model_var.get()
+            config = self.MODEL_CONFIGS.get(model, {})
+            backend = config.get("backend", "nanobanana")
+            
+            # 根据后端类型和模型名构建文件名前缀
+            if backend == "gpt_image_vip":
+                file_prefix = "GPT-image-2"
+            else:
+                parts = model.split("-")
+                if len(parts) >= 2:
+                    version_str = parts[1]
+                    if "." not in version_str:
+                        version_str = version_str + ".0"
+                    file_prefix = "Gemini-" + version_str
+                else:
+                    file_prefix = "Gemini-unknown"
+            
             # 生成日志文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(log_dir, f"gemini_{timestamp}_{log_type}.log")
+            log_file = os.path.join(log_dir, f"{file_prefix}_{timestamp}_{log_type}.log")
             
             # 修复：隐藏 API Key，不保存明文
             hidden_api_key = "SK_HIDDEN_API_KEY"
+            
+            # III.A.3: 只有实际发送了 imageSize 才记录，否则为 null
+            # actual_image_size 由调用方传入，None 表示未发送
+            image_size_to_log = actual_image_size
+            
             # 构建日志数据
             log_data = {
                 "timestamp": timestamp,
-                "model": self.model_var.get(),
-                "backend": self.get_backend_type(),
+                "model": model,
+                "backend": backend,
                 "prompt": self.prompt_text.get("1.0", tk.END).strip(),
                 "aspect_ratio": self.aspect_ratio.get(),
-                "resolution": self.resolution.get(),
+                "image_size": image_size_to_log,
                 "network_timeout": self.network_timeout.get(),
                 "reference_images": len(self.reference_images),
                 "api_key": hidden_api_key,
+                "url": url,
                 "data": data
             }
+            
+            # III.A.5: GPT 模式下补充 endpoint 类型
+            if gpt_endpoint_type:
+                log_data["gpt_endpoint_type"] = gpt_endpoint_type
+            
             # 保存日志文件
             with open(log_file, "w", encoding="utf-8") as f:
                 json.dump(log_data, f, indent=2, ensure_ascii=False, default=str)
