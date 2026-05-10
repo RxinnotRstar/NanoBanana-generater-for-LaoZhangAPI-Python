@@ -116,7 +116,7 @@ pip install requests pillow
 1. 检查 API 密钥是否有效
 2. 确认提示词未触发安全过滤器（查看 `safetyRatings`）
 3. 查看"原始响应"标签页的 `finishReason` 错误信息
-4. 尝试切换回稳定版模型（Gemini 2.5 Flash）
+4. 多试几次，或者换个模型生成
 5. 检查网络超时设置是否过短
 
 **界面显示异常**
@@ -129,12 +129,13 @@ pip install requests pillow
 **无法复制图片**
 
 - Windows：确保系统支持 BMP 格式剪贴板
-- macOS：使用 `osascript` 命令复制（无需额外依赖）
-- Linux：需安装 `xclip` 或 `wl-copy`（Wayland）
-- 如果失败，可手动保存图片后使用系统工具复制
+- macOS（测试版）：使用 `osascript` 命令复制（无需额外依赖）
+- Linux（测试版）：需安装 `xclip` 或 `wl-copy`（Wayland）
+- 如果还是失败，可手动保存图片后在系统内复制
 
 **依赖安装失败**
 
 - Windows：使用 `pip install --user` 安装到用户目录
 - Linux/macOS：使用 `pip3 install --user` 安装到用户目录
-- 如自动安装失败，请手动运行提示的安装命令
+- 如自动安装失败，请手动安装
+- 请检查python环境是否异常，例如没有添加`pip`到系统变量
