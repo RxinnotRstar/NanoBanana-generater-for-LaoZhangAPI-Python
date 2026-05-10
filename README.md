@@ -2,7 +2,7 @@
 
 一款基于 tkinter 的应用程序，通过老张 API 调用 Google Gemini 及 GPT Image 2 等模型生成图像。支持多项实用功能。
 
-*脚本源码使用 Kimi AI 和 Deepseek 生成，开发者负责写代码以外的一切事务。*
+*脚本源码使用 Kimi AI 和 Deepseek 生成，开发者负责编写代码以外的一切事务。*
 
 我的邀请链接：https://api.laozhang.ai/register/?aff_code=EVOV
 
