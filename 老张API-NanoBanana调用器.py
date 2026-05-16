@@ -8,6 +8,28 @@ import subprocess
 import time 
 import os 
 
+# 提前检测 Tkinter 是否可用，不然程序启动后直接崩溃会非常糟糕，尤其是对于不熟悉Python环境的小白用户
+try:
+    import tkinter
+except ImportError:
+    # 尝试修改终端/控制台标题，如果改不了其实也无伤大雅，主要是为了更显眼
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW("严重错误：缺少核心组件 Tkinter ！")
+    except (ImportError, AttributeError):
+        sys.stdout.write("\033]0;严重错误：缺少核心组件 Tkinter ！\007")
+        sys.stdout.flush()
+    
+    # 打印错误信息并退出
+    print("\n")
+    print("—— 严重错误：缺少核心组件 Tkinter ！")
+    print("\n")
+    print(" Tkinter 是 Python 的标准 GUI 库，但您的设备缺失 Tkinter ，无法启动该脚本。")
+    print("\n")
+    print("请上网搜索您的系统如何安装 Tkinter ，然后重新运行脚本。")
+    print("\n")
+    input("按任意键退出脚本……")
+    sys.exit(1)
 # ================ 依赖检查与自动安装模块 ================
 # 这是一个针对用户的防呆设计，可以自动检测并安装缺失的依赖
 # 如果缺依赖，程序会提示用户，并尝试自动安装，而不是直接崩溃
@@ -29,9 +51,24 @@ REQUIRED_DEPENDENCIES = [
     ("Pillow", "PIL"),
 ]
 
-# Windows平台可选依赖（缺失时自动安装但不作为启动必要条件）
+# 通用可选依赖（缺失时仅在必须依赖缺失时尝试安装）
+OPTIONAL_DEPENDENCIES = [
+    ("tkinterdnd2", "tkinterdnd2"),
+]
+
+# Windows平台可选依赖
 WINDOWS_OPTIONAL_DEPENDENCIES = [
     ("pywin32", "win32clipboard"),
+]
+
+# macOS平台可选依赖（预留）
+MACOS_OPTIONAL_DEPENDENCIES = [
+    # 例如: ("pyobjc", "Foundation")
+]
+
+# Linux平台可选依赖（预留）
+LINUX_OPTIONAL_DEPENDENCIES = [
+    # 例如: ("xclip", "xclip")  注意：xclip是命令行工具，非pip包，此处仅示例
 ]
 
 # ==============以下是依赖检查与安装逻辑=================
@@ -98,30 +135,55 @@ def _get_install_command(package_name, system_info):
     else:
         return f"pip3 install --user {package_name}"
 
+# 全局变量：记录缺失的可选依赖（供 UI 显示）
+_missing_optional_deps = []
+
 # 主检查与安装函数
 def _check_and_handle_dependencies():
     """检查依赖，如果缺失则提示用户并尝试安装"""
+    global _missing_optional_deps
     missing_deps = []
     
     # 检查必要依赖
     for pip_name, import_name in REQUIRED_DEPENDENCIES:
-        # 尝试导入模块
         try:
             __import__(import_name)
-        # 捕获导入错误
         except ImportError:
             missing_deps.append((pip_name, import_name))
     
-    # 如果有必要依赖缺失，在Windows下额外检查可选依赖
-    if missing_deps and platform.system() == "Windows":
-        for pip_name, import_name in WINDOWS_OPTIONAL_DEPENDENCIES:
+    # 如果有必要依赖缺失，则额外检查所有可选依赖（通用+当前平台）
+    if missing_deps:
+        # 1. 通用可选依赖
+        for pip_name, import_name in OPTIONAL_DEPENDENCIES:
+            try:
+                __import__(import_name)
+            except ImportError:
+                missing_deps.append((pip_name, import_name))
+        
+        # 2. 当前平台特定的可选依赖
+        current_platform = platform.system()
+        if current_platform == "Windows":
+            optional_list = WINDOWS_OPTIONAL_DEPENDENCIES
+        elif current_platform == "Darwin":
+            optional_list = MACOS_OPTIONAL_DEPENDENCIES
+        elif current_platform == "Linux":
+            optional_list = LINUX_OPTIONAL_DEPENDENCIES
+        else:
+            optional_list = []
+        
+        for pip_name, import_name in optional_list:
             try:
                 __import__(import_name)
             except ImportError:
                 missing_deps.append((pip_name, import_name))
     
-    # 如果没有缺失的必要依赖，直接返回（不检查可选依赖）
-    if not any(pip_name in [req[0] for req in REQUIRED_DEPENDENCIES] for pip_name, _ in missing_deps):
+    # 如果没有缺失的必要依赖，则记录缺失的可选依赖（供 UI 显示）并返回
+    required_pip_names = [req[0] for req in REQUIRED_DEPENDENCIES]
+    if not any(pip_name in required_pip_names for pip_name, _ in missing_deps):
+        # 收集缺失的可选依赖（通用+平台，但不包括必须依赖）
+        for pip_name, import_name in missing_deps:
+            if pip_name not in required_pip_names:
+                _missing_optional_deps.append(pip_name)
         return  # 所有必要依赖都已安装
     
     # 获取系统信息
@@ -158,21 +220,17 @@ def _check_and_handle_dependencies():
     # 询问是否尝试自动安装
     try:
         user_input = input("是否尝试自动安装缺失的包? (按Enter开始，输入n取消): ")
-        # 用户选择取消
         if user_input.lower() == 'n':
             print("取消自动安装，程序将在5秒后退出...")
             time.sleep(5)
             sys.exit(1)
-        # 尝试自动安装缺失的依赖
         print("\n正在尝试自动安装...")
         for pip_name, import_name in missing_deps:
             cmd = install_commands[missing_deps.index((pip_name, import_name))]
             print(f"安装 {pip_name}...")
-            # 执行安装命令
             try:
-                result = subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
+                subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
                 print(f"[OK] {pip_name} 安装成功")
-            
             except subprocess.CalledProcessError as e:
                 print(f"[FAIL] {pip_name} 安装失败: {e.stderr}")
                 print("\n建议手动运行命令安装，或联系系统管理员")
@@ -191,7 +249,6 @@ def _check_and_handle_dependencies():
                 print("请手动检查安装")
                 time.sleep(3)
                 sys.exit(1)
-    # 捕获用户中断和其他异常
     except KeyboardInterrupt:
         print("\n用户中断，程序退出")
         sys.exit(1)
@@ -214,6 +271,14 @@ print("="*60)
 # ================= 现在可以安全导入第三方库 ==================
 import requests
 from PIL import Image, ImageTk
+
+# 尝试导入可选依赖 tkinterdnd2，若失败则设置标志位
+TKINTERDND2_AVAILABLE = False
+try:
+    import tkinterdnd2
+    TKINTERDND2_AVAILABLE = True
+except ImportError:
+    pass
 
 # 开始程序主逻辑
 import tkinter as tk
@@ -444,11 +509,18 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 保底弹窗锁定状态（触发后永久锁定）
         self.fallback_locked = False
 
-        # 构建UI
+                # 构建UI
         self.setup_ui()
         self.setup_window_behavior()
         # 初始化关闭拦截
         self._intercept_close()
+        
+        # 注册拖放事件（将图片拖入窗口自动添加为参考图片）
+        if TKINTERDND2_AVAILABLE:
+            self.root.drop_target_register(tkinterdnd2.DND_FILES)
+            self.root.dnd_bind('<<Drop>>', self.on_drop)
+        else:
+            self.update_status("提示: 未安装 tkinterdnd2，拖放添加图片功能不可用")
         # 初始化完成
     def update_status(self, message):
         """更新状态栏文本"""
@@ -861,14 +933,31 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             '.webp': 'image/webp'
         }
         return mime_types.get(ext, 'image/jpeg')
-    # 添加参考图片
-    def add_images(self):
-        """添加多张参考图片"""
-        # 打开文件对话框选择图片
-        filepaths = filedialog.askopenfilenames(
-            title="选择参考图片",
-            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")]
-        )
+        # 添加参考图片
+    def add_images(self, filepaths_without_dialog=None):
+        """添加多张参考图片
+        
+        参数:
+            filepaths_without_dialog: 可选，直接传入文件路径列表（用于拖放导入），
+                                     为None时弹出文件对话框
+        """
+        if filepaths_without_dialog is None:
+            # 打开文件对话框选择图片
+            filepaths = filedialog.askopenfilenames(
+                title="选择参考图片",
+                filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")]
+            )
+        else:
+            # 拖放导入：直接使用传入的文件路径列表，过滤非图片文件和不存在的文件
+            filepaths = [
+                fp for fp in filepaths_without_dialog 
+                if os.path.isfile(fp) and 
+                os.path.splitext(fp)[1].lower() in ['.jpg', '.jpeg', '.png', '.webp']
+            ]
+            if not filepaths:
+                self.update_status("拖放内容中未找到有效的图片文件")
+                return
+        
         # 没有选择图片则返回
         if not filepaths:
             return
@@ -909,6 +998,91 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 更新预览
         self.update_reference_preview()
         self.update_status(f"已添加 {added_count} 张参考图片")
+
+    # 处理拖放事件：将拖入窗口的图片文件自动导入为参考图片
+    def on_drop(self, event):
+        """处理拖放事件，将拖入的图片文件导入为参考图片"""
+        # tkinterdnd2 传入的 event.data 通常为文件URL格式或路径列表，需解析
+        raw = event.data
+        supported_paths = []
+        unsupported_exts = set()
+        # 以空格/换行分隔处理多个文件
+        for item in raw.split():
+            item = item.strip()
+            if not item:
+                continue
+            # 去掉 file:// 前缀（如有）
+            if item.startswith('file://'):
+                item = item[7:]
+            # 去掉花括号和引号
+            item = item.strip('{}"')
+            ext = os.path.splitext(item)[1].lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                supported_paths.append(item)
+            else:
+                if ext:
+                    unsupported_exts.add(ext)
+                else:
+                    # 无扩展名（如文件夹）标记为 "[文件夹]"
+                    unsupported_exts.add("[文件夹]")
+        
+        # 如果有不支持的格式，弹出确认对话框
+        if unsupported_exts:
+            # 构建弹窗
+            dialog = tk.Toplevel(self.root)
+            dialog.title("提示")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            dialog.resizable(True, True)
+            dialog.bind("<Escape>", lambda e: dialog.destroy())
+            
+            # 文案
+            ext_list = ", ".join(sorted(unsupported_exts))
+            message = f"暂不支持以下格式：\n\n{ext_list}\n\n若您需要导入其他格式的图片，\n请先使用工具将其转换为JPG、PNG、WEBP格式。"
+            label = tk.Label(dialog, text=message, justify=tk.LEFT, wraplength=400)
+            label.pack(padx=20, pady=15, fill=tk.BOTH, expand=True)
+            
+            # 按钮框架
+            btn_frame = tk.Frame(dialog)
+            btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+            
+            result = {"import_supported": False}
+            
+            def on_import_supported():
+                result["import_supported"] = True
+                dialog.destroy()
+            
+            def on_cancel_all():
+                result["import_supported"] = False
+                dialog.destroy()
+            
+            # 两个按钮水平均分
+            import_btn = ttk.Button(btn_frame, text="仅导入支持的图片", command=on_import_supported)
+            import_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+            cancel_btn = ttk.Button(btn_frame, text="取消全部导入", command=on_cancel_all)
+            cancel_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+            
+            # 设置关闭按钮行为
+            dialog.protocol("WM_DELETE_WINDOW", on_import_supported)
+            
+            # 居中弹窗
+            dialog.update_idletasks()
+            x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
+            y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
+            dialog.geometry(f"+{x}+{y}")
+            
+            self.root.wait_window(dialog)
+            
+            if not result["import_supported"]:
+                self.update_status("用户取消全部导入")
+                return
+        
+        # 导入支持的图片
+        if supported_paths:
+            self.update_status(f"正在导入拖放的 {len(supported_paths)} 张图片...")
+            self.add_images(filepaths_without_dialog=supported_paths)
+        else:
+            self.update_status("拖放内容中未找到有效的图片文件")
 
     def update_ref_count_label(self):
         """更新参考图片计数标签"""
@@ -2249,9 +2423,18 @@ def main():
     print(f"工作目录已切换到: {os.getcwd()}")
     # ===================================================
     
-    root = tk.Tk()
+    if TKINTERDND2_AVAILABLE:
+        root = tkinterdnd2.TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     root.minsize(1000, 800)
     app = GeminiImageGenerator(root)
+    
+    # 输出缺失的可选依赖到状态栏
+    if _missing_optional_deps:
+        missing_names = ", ".join(_missing_optional_deps)
+        app.update_status(f"提示: 以下可选依赖未安装，部分功能可能不可用: {missing_names}")
+    
     root.mainloop()
 # ==================== 运行主程序 ====================
 if __name__ == "__main__":
