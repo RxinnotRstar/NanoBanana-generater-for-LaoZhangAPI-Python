@@ -225,6 +225,7 @@ import json
 import io
 import ctypes
 import tempfile
+import random
 
 # 所有模块加载完成
 print("核心模块加载完成")
@@ -437,9 +438,17 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 记录上一次通过验证的参数组合（模型, 纵横比, 分辨率）
         self.last_verified_params = None
 
+        # 关闭拦截失败计数器（独立计数，切换弹窗类型时清零）
+        self.button_fail_count = 0
+        self.slider_fail_count = 0
+        # 保底弹窗锁定状态（触发后永久锁定）
+        self.fallback_locked = False
+
         # 构建UI
         self.setup_ui()
         self.setup_window_behavior()
+        # 初始化关闭拦截
+        self._intercept_close()
         # 初始化完成
     def update_status(self, message):
         """更新状态栏文本"""
@@ -1360,7 +1369,6 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         resolution = self.resolution.get()
         
         # 随机选择要验证的参数项
-        import random
         verify_target = random.choice(["分辨率", "纵横比", "模型"])
         
         # 构建显示文案
@@ -2094,7 +2102,137 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                     
         except Exception:
             pass # 没关系，反正最小化失败也不影响使用，就是终端还在那儿而已
-    
+
+    # ==================== 关闭拦截功能 ====================
+    def _intercept_close(self):
+        """拦截窗口关闭请求"""
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
+
+    def _on_close_request(self):
+        """统一关闭入口，根据状态触发不同弹窗"""
+        if self.fallback_locked:
+            self._show_fallback_dialog()
+            return
+
+        has_prompt = len(self.prompt_text.get("1.0", "end-1c").strip()) > 0
+        has_images = len(self.reference_images) > 0
+        is_generating = self.generate_thread is not None and self.generate_thread.is_alive()
+
+        if is_generating:
+            # 高优先级：生成中，清空按钮弹窗计数
+            self.button_fail_count = 0
+            self._show_slider_confirm_dialog()
+        elif has_prompt or has_images:
+            # 低优先级：有内容未清空，清空滑块弹窗计数
+            self.slider_fail_count = 0
+            self._show_close_confirm_dialog()
+        else:
+            # 无风险状态，直接退出
+            self.root.destroy()
+
+    def _show_close_confirm_dialog(self):
+        """四按钮随机确认弹窗（1确定3取消）"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("确认关闭")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        tk.Label(dialog, text="是否确认关闭？", font=("TkDefaultFont", 11, "bold")).pack(pady=(15, 10))
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10, padx=20)
+
+        buttons = [("确定", True), ("取消", False), ("取消", False), ("取消", False)]
+        random.shuffle(buttons)
+
+        def on_click(is_confirm):
+            dialog.destroy()
+            if is_confirm:
+                self.root.destroy()
+            else:
+                self.button_fail_count += 1
+                if self.button_fail_count >= 3:
+                    self.fallback_locked = True
+
+        for i, (text, is_confirm) in enumerate(buttons):
+            row, col = divmod(i, 2)
+            btn = ttk.Button(btn_frame, text=text, width=12,
+                           command=lambda c=is_confirm: on_click(c))
+            btn.grid(row=row, column=col, padx=5, pady=5)
+
+        ttk.Button(dialog, text="返回", command=dialog.destroy, width=20).pack(pady=(5, 15))
+        self._center_dialog(dialog)
+
+    def _show_slider_confirm_dialog(self):
+        """滑块验证弹窗"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("验证退出")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        target = random.randint(1, 7)
+
+        tk.Label(dialog, text=f"滑动到 {target}，再按下确定。",
+                font=("TkDefaultFont", 11, "bold")).pack(pady=(15, 5), padx=20)
+
+        tk.Label(dialog, text="注意：一旦开始生成就不能取消，强行关闭脚本仍然会扣费！",
+                foreground="red", wraplength=380).pack(pady=5, padx=20)
+
+        slider_var = tk.IntVar(value=0)
+
+        value_label = tk.Label(dialog, text="当前值：0", font=("TkDefaultFont", 10))
+        value_label.pack(pady=5)
+
+        slider = ttk.Scale(dialog, from_=0, to=7, orient=tk.HORIZONTAL,
+                          variable=slider_var, length=350)
+        slider.pack(padx=20, pady=5, fill=tk.X)
+
+        def on_slide(*args):
+            value_label.config(text=f"当前值：{slider_var.get()}")
+        slider_var.trace_add("write", on_slide)
+
+        def on_confirm():
+            if slider_var.get() == target:
+                dialog.destroy()
+                self.root.destroy()
+            else:
+                self.slider_fail_count += 1
+                dialog.destroy()
+                if self.slider_fail_count >= 3:
+                    self.fallback_locked = True
+
+        ttk.Button(dialog, text="确定", command=on_confirm, width=20).pack(pady=10)
+        ttk.Button(dialog, text="返回", command=dialog.destroy, width=20).pack(pady=(0, 15))
+        self._center_dialog(dialog)
+
+    def _show_fallback_dialog(self):
+        """保底弹窗（触发后永久锁定）"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("退出确认")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        tk.Label(dialog, text="检测到多次退出失败，现在可以按下“确定”按钮退出。",
+                font=("TkDefaultFont", 11), wraplength=380).pack(pady=(20, 15), padx=20)
+
+        ttk.Button(dialog, text="确定", command=lambda: (dialog.destroy(), self.root.destroy()),
+                  width=20).pack(pady=(0, 20))
+        self._center_dialog(dialog)
+
+    def _center_dialog(self, dialog):
+        """将弹窗居中于主窗口"""
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
+        y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
+        dialog.geometry(f"+{x}+{y}")
 
     def _insert_data_warning(self):
         """**改进：防止用户编辑只读文本框**"""
