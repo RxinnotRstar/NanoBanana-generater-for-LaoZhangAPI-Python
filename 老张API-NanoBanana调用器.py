@@ -59,6 +59,7 @@ OPTIONAL_DEPENDENCIES = [
 # Windows平台可选依赖
 WINDOWS_OPTIONAL_DEPENDENCIES = [
     ("pywin32", "win32clipboard"),
+    ("comtypes", "comtypes"),
 ]
 
 # macOS平台可选依赖（预留）
@@ -292,6 +293,18 @@ import ctypes
 import tempfile
 import random
 
+# Windows 任务栏进度条支持
+if platform.system() == "Windows":
+    try:
+        import comtypes
+        from comtypes import GUID, COMMETHOD, HRESULT
+        from comtypes.client import CreateObject
+        COMTYPES_AVAILABLE = True
+    except ImportError:
+        COMTYPES_AVAILABLE = False
+else:
+    COMTYPES_AVAILABLE = False
+
 # 所有模块加载完成
 print("核心模块加载完成")
 print("正在初始化图形界面...\n")
@@ -468,6 +481,11 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 新增：代理警告抑制状态（临时，不持久化）
         self.proxy_warning_suppressed = False
+
+        # Windows 任务栏进度条
+        self.taskbar_progress = None
+        if platform.system() == "Windows" and COMTYPES_AVAILABLE:
+            self._init_taskbar_progress()
         
         # 检测pywin32可用性（仅Windows平台）
         self.pywin32_available = False
@@ -521,6 +539,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             self.root.dnd_bind('<<Drop>>', self.on_drop)
         else:
             self.update_status("提示: 未安装 tkinterdnd2，拖放添加图片功能不可用")
+        # 绑定窗口获得焦点事件，清除任务栏进度条
+        self.root.bind("<FocusIn>", self._clear_taskbar_on_focus)
+
         # 初始化完成
     def update_status(self, message):
         """更新状态栏文本"""
@@ -535,6 +556,139 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             self.status_text.see(tk.END)
         
             self.status_text.config(state=tk.DISABLED)
+    def _init_taskbar_progress(self):
+        """初始化 Windows 任务栏进度条（ITaskbarList3）"""
+        if platform.system() != "Windows" or not COMTYPES_AVAILABLE:
+            return
+
+        class ITaskbarList3(comtypes.IUnknown):
+            _iid_ = GUID('{ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf}')
+            _methods_ = [
+                COMMETHOD([], HRESULT, 'HrInit'),
+                COMMETHOD([], HRESULT, 'AddTab',
+                          (['in'], ctypes.c_ulonglong, 'hwnd')),
+                COMMETHOD([], HRESULT, 'DeleteTab',
+                          (['in'], ctypes.c_ulonglong, 'hwnd')),
+                COMMETHOD([], HRESULT, 'ActivateTab',
+                          (['in'], ctypes.c_ulonglong, 'hwnd')),
+                COMMETHOD([], HRESULT, 'SetActiveAlt',
+                          (['in'], ctypes.c_ulonglong, 'hwnd')),
+                COMMETHOD([], HRESULT, 'MarkFullscreenWindow',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_int, 'fFullscreen')),
+                COMMETHOD([], HRESULT, 'SetProgressValue',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_ulonglong, 'ullCompleted'),
+                          (['in'], ctypes.c_ulonglong, 'ullTotal')),
+                COMMETHOD([], HRESULT, 'SetProgressState',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_int, 'tbpFlags')),
+                COMMETHOD([], HRESULT, 'RegisterTab',
+                          (['in'], ctypes.c_ulonglong, 'hwndTab'),
+                          (['in'], ctypes.c_ulonglong, 'hwndMDI')),
+                COMMETHOD([], HRESULT, 'UnregisterTab',
+                          (['in'], ctypes.c_ulonglong, 'hwndTab')),
+                COMMETHOD([], HRESULT, 'SetTabOrder',
+                          (['in'], ctypes.c_ulonglong, 'hwndTab'),
+                          (['in'], ctypes.c_ulonglong, 'hwndInsertBefore')),
+                COMMETHOD([], HRESULT, 'SetTabActive',
+                          (['in'], ctypes.c_ulonglong, 'hwndTab'),
+                          (['in'], ctypes.c_ulonglong, 'hwndMDI'),
+                          (['in'], ctypes.c_ulong, 'dwReserved')),
+                COMMETHOD([], HRESULT, 'ThumbBarAddButtons',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_uint, 'cButtons'),
+                          (['in'], ctypes.POINTER(ctypes.c_void_p), 'pButton')),
+                COMMETHOD([], HRESULT, 'ThumbBarUpdateButtons',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_uint, 'cButtons'),
+                          (['in'], ctypes.POINTER(ctypes.c_void_p), 'pButton')),
+                COMMETHOD([], HRESULT, 'ThumbBarSetImageList',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_void_p, 'himl')),
+                COMMETHOD([], HRESULT, 'SetOverlayIcon',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_void_p, 'hIcon'),
+                          (['in'], ctypes.c_wchar_p, 'pszDescription')),
+                COMMETHOD([], HRESULT, 'SetThumbnailTooltip',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_wchar_p, 'pszTip')),
+                COMMETHOD([], HRESULT, 'SetThumbnailClip',
+                          (['in'], ctypes.c_ulonglong, 'hwnd'),
+                          (['in'], ctypes.c_void_p, 'prcClip')),
+            ]
+
+        # 进度条状态常量
+        TBPF_NOPROGRESS = 0x0
+        TBPF_INDETERMINATE = 0x1
+        TBPF_NORMAL = 0x2
+        TBPF_ERROR = 0x4
+        TBPF_PAUSED = 0x8
+
+        class TaskbarProgressHelper:
+            def __init__(self, root):
+                self.root = root
+                self._hwnd = None
+                self._taskbar = None
+                self._init_taskbar()
+
+            def _init_taskbar(self):
+                try:
+                    self._taskbar = CreateObject(
+                        '{56FDF344-FD6D-11d0-958A-006097C9A090}',
+                        interface=ITaskbarList3
+                    )
+                    self._taskbar.HrInit()
+                except Exception:
+                    self._taskbar = None
+
+            def _get_hwnd(self):
+                if self._hwnd is None:
+                    frame = self.root.wm_frame()
+                    if frame:
+                        self._hwnd = int(frame, 16)
+                return self._hwnd
+
+            def set_state(self, state):
+                if not self._taskbar:
+                    return
+                hwnd = self._get_hwnd()
+                if hwnd:
+                    try:
+                        self._taskbar.SetProgressState(hwnd, state)
+                    except Exception:
+                        pass
+
+            def set_value(self, completed, total):
+                if not self._taskbar:
+                    return
+                hwnd = self._get_hwnd()
+                if hwnd:
+                    try:
+                        self._taskbar.SetProgressValue(hwnd, completed, total)
+                    except Exception:
+                        pass
+
+            def clear(self):
+                self.set_state(TBPF_NOPROGRESS)
+
+            def set_progress(self, percent, state=TBPF_NORMAL):
+                self.set_state(state)
+                if state != TBPF_INDETERMINATE:
+                    self.set_value(int(percent), 100)
+
+        self.taskbar_progress = TaskbarProgressHelper(self.root)
+
+    def _clear_taskbar_on_focus(self, event=None):
+        """窗口获得焦点时清除任务栏进度条（仅当处于完成状态时）"""
+        if not self.taskbar_progress:
+            return
+        # 获取当前进度条状态，避免在不确定动画期间误清除
+        # 通过检查生成按钮状态判断：如果按钮是禁用状态，说明生成正在进行中
+        if str(self.generate_btn.cget("state")) == "disabled":
+            return
+        self.taskbar_progress.clear()
+
     # ==================== 界面构建函数 ====================
     def setup_ui(self):
         """构建左右分区的用户界面"""
@@ -589,12 +743,18 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         model_values = list(self.MODEL_CONFIGS.keys())
         combo_width = max(len(v) for v in model_values) + 1 if model_values else 10
         
-        # API密钥输入（更改“show=”可以实现替换加密文本，别忘了更改下面的按钮里面的文本）
+        # API密钥输入（内嵌按钮样式）
         ttk.Label(api_frame, text="API密钥:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="草", width=combo_width)
-        api_entry.grid(row=0, column=1, sticky=tk.W)
-        self.api_key_entry = api_entry
-        # 显示/隐藏API密钥按钮
+        
+        # 创建带边框的容器Frame，伪装成输入框外观
+        key_container = tk.Frame(api_frame, bd=1, relief=tk.SUNKEN, bg="white")
+        key_container.grid(row=0, column=1, sticky=tk.W)
+        self.api_key_entry = key_container
+        
+        api_entry = tk.Entry(key_container, textvariable=self.api_key, show="草",
+                             bd=0, highlightthickness=0, bg="white", width=combo_width)
+        api_entry.pack(side=tk.LEFT, fill=tk.Y, padx=(2, 0))
+        
         def toggle_key_visibility():
             if api_entry['show'] == '草':
                 api_entry.config(show='')
@@ -602,9 +762,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             else:
                 api_entry.config(show='草')
                 toggle_btn.config(text='显示')
-        # 绑定回车键触发生成
-        toggle_btn = ttk.Button(api_frame, text='显示', command=toggle_key_visibility, width=4)
-        toggle_btn.grid(row=0, column=2, padx=(5, 0))
+        
+        toggle_btn = tk.Button(key_container, text='显示', command=toggle_key_visibility,
+                               bd=0, highlightthickness=0, bg="#e0e0e0",
+                               activebackground="#d0d0d0", cursor="hand2",
+                               padx=6, pady=0, font=("TkDefaultFont", 9))
+        toggle_btn.pack(side=tk.RIGHT, fill=tk.Y)
         # 模型选择
         ttk.Label(api_frame, text="模型:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo = ttk.Combobox(api_frame, textvariable=self.model_var, 
@@ -800,6 +963,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 为提示词文本框添加右键菜单
         self._create_context_menu(self.prompt_text)
+        
+        # 绑定窗口获得焦点事件，清除任务栏进度条
+        self.root.bind("<FocusIn>", self._clear_taskbar_on_focus)
 
     # ==================== 文本框增强功能 ====================
     def _create_context_menu(self, text_widget):
@@ -1222,6 +1388,10 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 禁用生成按钮
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
         self.update_status("正在生成图片...")
+        
+        # Windows 任务栏进度条：显示不确定动画
+        if self.taskbar_progress:
+            self.taskbar_progress.set_progress(0, 0x1)  # TBPF_INDETERMINATE
         
         # 根据后端类型选择线程函数
         backend = self.get_backend_type()
