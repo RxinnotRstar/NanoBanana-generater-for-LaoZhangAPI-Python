@@ -539,8 +539,6 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             self.root.dnd_bind('<<Drop>>', self.on_drop)
         else:
             self.update_status("提示: 未安装 tkinterdnd2，拖放添加图片功能不可用")
-        # 绑定窗口获得焦点事件，清除任务栏进度条
-        self.root.bind("<FocusIn>", self._clear_taskbar_on_focus)
 
         # 初始化完成
     def update_status(self, message):
@@ -618,7 +616,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                           (['in'], ctypes.c_void_p, 'prcClip')),
             ]
 
-        # 进度条状态常量
+        # 进度条状态常量（Windows SDK 定义）
         TBPF_NOPROGRESS = 0x0
         TBPF_INDETERMINATE = 0x1
         TBPF_NORMAL = 0x2
@@ -680,14 +678,20 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         self.taskbar_progress = TaskbarProgressHelper(self.root)
 
     def _clear_taskbar_on_focus(self, event=None):
-        """窗口获得焦点时清除任务栏进度条（仅当处于完成状态时）"""
+        """窗口获得焦点时清除任务栏进度条"""
         if not self.taskbar_progress:
             return
-        # 获取当前进度条状态，避免在不确定动画期间误清除
-        # 通过检查生成按钮状态判断：如果按钮是禁用状态，说明生成正在进行中
+        # 只有在生成按钮恢复可用状态（即生成已结束）时才清除
+        # 避免在生成过程中切换窗口导致不确定动画被意外中断
         if str(self.generate_btn.cget("state")) == "disabled":
             return
         self.taskbar_progress.clear()
+
+    def _clear_taskbar_before_error(self):
+        """在弹出错误弹窗前清除任务栏进度条并刷新UI"""
+        if self.taskbar_progress:
+            self.taskbar_progress.clear()
+        self.root.update_idletasks()
 
     # ==================== 界面构建函数 ====================
     def setup_ui(self):
@@ -1542,6 +1546,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             # 检查HTTP状态码
             if response.status_code != 200:
                 error_msg = f"HTTP错误 {response.status_code}: {response.text}"
+                self._clear_taskbar_before_error()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status(f"生成失败: HTTP {response.status_code}")
                 if self.log_to_file.get():
@@ -1554,6 +1559,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             # 检查API错误
             if "error" in result:
                 error_msg = result["error"].get("message", str(result["error"]))
+                self._clear_taskbar_before_error()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status("生成失败: API错误")
                 if self.log_to_file.get():
@@ -1593,9 +1599,14 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.copy_btn.config(state=tk.NORMAL)
                 self.update_status("生成成功")
                 
+                # Windows 任务栏进度条：显示 100% 绿色确定进度
+                if self.taskbar_progress:
+                    self.taskbar_progress.set_progress(100, 0x2)  # TBPF_NORMAL
+                
                 if self.log_to_file.get():
                     self._save_log(result, "success", url=url, actual_image_size=actual_image_size)
             except (KeyError, IndexError, ValueError) as e:
+                self._clear_taskbar_before_error()
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
                 self.response_text.insert("1.0", json.dumps(result, indent=2, ensure_ascii=False))
@@ -1610,6 +1621,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             # 检查HTTP状态码
             if response.status_code != 200:
                 error_msg = f"HTTP错误 {response.status_code}: {response.text}"
+                self._clear_taskbar_before_error()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status(f"生成失败: HTTP {response.status_code}")
                 if self.log_to_file.get():
@@ -1623,6 +1635,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             # 检查API错误
             if "error" in result:
                 error_msg = result["error"].get("message", str(result["error"]))
+                self._clear_taskbar_before_error()
                 messagebox.showerror("API错误", error_msg)
                 self.update_status("生成失败: API错误")
                 if self.log_to_file.get():
@@ -1667,9 +1680,14 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 self.copy_btn.config(state=tk.NORMAL)
                 self.update_status("生成成功")
                 
+                # Windows 任务栏进度条：显示 100% 绿色确定进度
+                if self.taskbar_progress:
+                    self.taskbar_progress.set_progress(100, 0x2)  # TBPF_NORMAL
+                
                 if self.log_to_file.get():
                     self._save_log(result, "success", url=url, gpt_endpoint_type=gpt_endpoint_type)
             except (KeyError, IndexError, ValueError) as e:
+                self._clear_taskbar_before_error()
                 messagebox.showerror("响应错误", f"处理API响应失败:\n{str(e)}")
                 self.response_text.delete("1.0", tk.END)
                 self.response_text.insert("1.0", json.dumps(result, indent=2, ensure_ascii=False))
@@ -1679,9 +1697,20 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
     # 处理异常错误
     def _handle_error(self, error_msg, url=None):
         """处理异常错误"""
-        messagebox.showerror("错误", f"生成过程中发生异常:\n{error_msg}")
+        # 没有做错误的进度条，是因为错误弹窗自带变色显示，不需要额外的进度条了
+        
+        # 先清除任务栏进度条，避免弹窗期间进度条残留
+        if self.taskbar_progress:
+            self.taskbar_progress.clear()
+        
+        # 再恢复按钮状态
         self.update_status("生成失败: 异常错误")
         self.generate_btn.config(state=tk.NORMAL, text="生成图片")
+        
+        # 强制刷新 UI，让按钮恢复和进度条清除在模态弹窗阻塞前立即生效
+        self.root.update_idletasks()
+        
+        messagebox.showerror("错误", f"生成过程中发生异常:\n{error_msg}")
         
         # **改进：记录错误日志**
         if self.log_to_file.get():
