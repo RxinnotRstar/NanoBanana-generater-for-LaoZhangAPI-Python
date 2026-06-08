@@ -1,6 +1,8 @@
-# 老张API-NanoBanana图片生成器
+# 老张API - NanoBanana 和 GPTimage2 图片生成器
 
 一款基于 tkinter 的应用程序，通过老张 API 调用 Google Gemini 及 GPT Image 2 等模型生成图像。支持多项实用功能。
+
+> _**老张API用户开箱即用，无需修改源码。非老张API用户，可以基于中转站提供的API文档，用AI改成你的中转站的版本。**_
 
 *脚本源码使用 Kimi AI 和 Deepseek 生成，开发者负责编写代码以外的一切事务。*
 
