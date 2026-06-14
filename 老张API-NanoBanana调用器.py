@@ -8,6 +8,8 @@ import subprocess
 import time 
 import os 
 
+# 前排提示：搜索TEMPLATE_TOML，可以快速定位到内置的配置文件模板，方便一键配置。
+
 # 提前检测 Tkinter 是否可用，不然程序启动后直接崩溃会非常糟糕，尤其是对于不熟悉Python环境的小白用户
 try:
     import tkinter
@@ -54,6 +56,7 @@ REQUIRED_DEPENDENCIES = [
 # 通用可选依赖（缺失时仅在必须依赖缺失时尝试安装）
 OPTIONAL_DEPENDENCIES = [
     ("tkinterdnd2", "tkinterdnd2"),
+    ("tomli", "tomli"),
 ]
 
 # Windows平台可选依赖
@@ -273,6 +276,18 @@ print("="*60)
 import requests
 from PIL import Image, ImageTk
 
+# ------ TOML 库导入（优先内置 tomllib，回退 tomli）------
+TOML_AVAILABLE = False
+try:
+    import tomllib  # Python 3.11+ 内置
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
+if tomllib is not None:
+    TOML_AVAILABLE = True
+
 # 尝试导入可选依赖 tkinterdnd2，若失败则设置标志位
 TKINTERDND2_AVAILABLE = False
 try:
@@ -322,6 +337,31 @@ class GeminiImageGenerator:
     # 根据作者实测，利用回归函数（y=ax+b）计算左侧面板的宽度
     LEFT_WIDTH_SLOPE = 2.645      # 每增加 1% 缩放，面板宽度增加的像素
     LEFT_WIDTH_INTERCEPT = 220   # 缩放 0% 时的基准宽度（理论值，用于平移）
+
+    # ==================== TOML 配置文件常量 ====================
+    # 各字段合法枚举值
+    TOML_VALID_VALUES = {
+        "import_mode": ["clear_and_overwrite", "overwrite_existing"],
+        "model": ["gemini-2.5-flash-image", "gemini-3-pro-image-preview",
+                  "gemini-3.1-flash-image-preview", "gpt-image-2-vip"],
+        "aspect_ratio": ["16:9", "5:4", "4:3", "3:2", "1:1", "21:9", "2:3", "3:4", "4:5", "9:16"],
+        "resolution": ["1K", "2K", "4K"],
+        "zoom": ["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"],
+        "valid_image_exts": [".jpg", ".jpeg", ".png", ".webp"],
+    }
+    # 默认值（与 __init__ 中初始化一致）
+    TOML_DEFAULTS = {
+        "api_key": "",
+        "model": "gemini-3.1-flash-image-preview",
+        "aspect_ratio": "1:1",
+        "resolution": "4K",
+        "network_timeout": "1200",
+        "confirm_before_generate": True,
+        "log_to_file": False,
+        "prompt": "",
+        "zoom": "100%",
+        "prompt_lines": 5,
+    }
 
     # 模型配置
     MODEL_CONFIGS = {
@@ -441,6 +481,165 @@ class V:
   except Exception as e:mb.showerror("错误",f"保存失败: {str(e)}")
 if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
 '''
+
+    # ==================== 配置文件模板（供用户复制） ====================
+    # 将以下内容保存为 .toml 文件，拖入程序窗口即可导入配置；
+    # 命名为 default.toml 放在程序同目录下，可实现自动导入。
+    # 后续搜索TEMPLATE_TOML，可以快速定位到这里，方便复制TOML模板。
+    # 不要直接修改下面的模板内容，改了也没有用。
+    # 正确的做法是复制下面的内容，保存为 .toml 文件，然后拖入程序窗口，
+    # 或者命名为 default.toml 放在程序同目录下实现自动导入。
+
+    TEMPLATE_TOML = r""" # 从下面开始是模板内容，注意不要复制这行字走了，这是脚本代码的一部分，不是模板的一部分。
+
+
+
+# 老张API-NanoBanana调用器 配置文件
+# 将本文件拖入程序窗口，即可自动填写配置。一次只可以拖入一个配置文件。
+# 名字改成default.toml并放在程序同目录下，可以实现自动导入配置。
+
+#####################【导入模式 - 必填】#####################
+
+# 决定现在这份toml文件怎么导入到脚本里面。
+
+## clear_and_overwrite：
+### 清空全部内容，然后覆盖掉配置文件里有的东西。
+### 没写的配置会被还原成默认值，写了但是留空的配置会被清空。
+### 如果有无法解析的值（例如写错模型名字），脚本会弹窗报错，并拒绝导入全部内容。
+
+## overwrite_existing(推荐)：
+### 覆盖掉配置文件里有的东西。
+### 没写的配置不会去动，写了但是留空的配置会被清空。
+### 如果有无法解析的值（例如写错模型名字），脚本会弹窗报错，然后询问用户是否继续导入剩下的配置项。
+
+import_mode = "overwrite_existing"
+
+#########################【API配置】#########################
+[api]
+# 【API密钥】
+# 调用API接口的密钥。
+# 示例：key = "sk-123456789abcdefghijklmno1234567890abcdef12345678"
+
+key = ""
+
+# ------------------------------------------------------------
+
+# 【模型选择】
+# 可选值:
+# "gemini-2.5-flash-image", "gemini-3-pro-image-preview",
+# "gemini-3.1-flash-image-preview", "gpt-image-2-vip"
+
+model = "gemini-3.1-flash-image-preview"
+
+#########################【生成参数】#########################
+
+[generation]
+# 【纵横比】
+# 可选值:
+# 竖版——"16:9", "5:4", "4:3", "3:2",
+# 特殊——"1:1", "21:9",
+# 横版——"2:3", "3:4", "4:5", "9:16"
+
+aspect_ratio = "4:3"
+
+# ------------------------------------------------------------
+
+# 【分辨率】
+# 可选值: "1K", "2K", "4K"
+# 注意: gemini-2.5-flash-image 仅支持 "1K"
+
+resolution = "2K"
+
+# ------------------------------------------------------------
+
+# 【网络超时时间】
+# 单位：秒，0表示无限制，默认1200秒
+
+network_timeout = 1800
+
+# ------------------------------------------------------------
+
+# 【生成前确认】
+# 生成前是否弹出参数确认弹窗，防止未检查导致误生成
+# true = 开启，false = 关闭
+
+confirm_before_generate = false
+
+# ------------------------------------------------------------
+
+# 【自动保存生成日志】
+# true = 开启，false = 关闭
+
+log_to_file = false
+
+# ------------------------------------------------------------
+
+
+######################### 【提示词】 #########################
+
+# 提示词支持多行，只要在前后使用三个单引号包裹，就可以保留换行符。
+# 如果忘记加后半段的三个单引号，那么就算作无法解析，脚本会拒绝导入。
+# 三个单引号所在的行也是可以写东西的，但是不建议写，因为担心写的时候不小心写到外面，导致无法解析。
+# 示例（实际写的时候不用加"#"号）：
+# prompt = '''
+# 生成一只猫，要求：
+# 1. 橘色上肢，紫色下肢；
+# 2. 正在玩CSGO。
+# 3. 电脑桌面上有一盆猫粮。'''
+
+prompt = '''
+生成一只猫，要求：
+1. 橘色上肢，紫色下肢；
+2. 正在玩CSGO。
+3. 电脑桌面上有一盆猫粮。
+'''
+
+######################## 【界面设置】 ########################
+
+[ui]
+# 界面缩放比例
+# 可选值: "75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"。
+zoom = "125%"
+
+# 提示词输入框行数（2~98）
+prompt_lines = 4
+
+######################## 【参考图片】 ########################
+# 程序启动时自动加载的参考图片路径列表。如果留空，会导致程序报错，建议不用时加上"#"注释掉，或者后续再添加。
+# 支持导入多张图片，程序会自动把它们放在一起作为参考图输入给模型。
+# 使用 [[reference_images]] 添加多张，每张一个 path 字段，详见示例。
+# 支持绝对路径（完整的图片路径）和相对路径（相对于脚本所在目录），但是新手不建议用相对路径。
+# 推荐使用正斜杠（/）作为路径分隔符；
+# 如果使用反斜杠（\），要使用两次（\\）来转义toml语法，确保不会识别错误。
+# 图片格式仅限: jpg, jpeg, png, webp。
+# 文件必须存在且为有效图片，否则视为无法解析。
+
+# 示例1：绝对路径导入多张图片
+# [[reference_images]]
+# path = "D:/图片生成脚本/素材图片/公司图标.png"
+# [[reference_images]]
+# path = "D:\\图片生成脚本\\素材图片\\背景图.jpg"
+# [[reference_images]]
+# path = "D:/图片生成脚本/素材图片/人物照片.webp"
+#
+# 示例2：相对路径导入多张图片
+# [[reference_images]]
+# path = ".\\素材图片\\公司图标.png"
+# [[reference_images]]
+# path = "./素材图片/背景图.jpg"
+# [[reference_images]]
+# path = ".\\素材图片\\人物照片.webp"
+
+[[reference_images]]
+path = ""
+
+
+
+""" # 配置模板到此结束，注意这三个引号是脚本代码的一部分（不是模板的一部分），不要复制走了
+
+
+
+
     # ==================== 初始化与UI构建 ====================
     def __init__(self, root):
         self.root = root
@@ -860,7 +1059,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         # 纵横比和分辨率选择
         ttk.Label(param_grid, text="纵横比:").grid(row=0, column=0, sticky=tk.W, padx=(0, 2))
         aspect_combo = ttk.Combobox(param_grid, textvariable=self.aspect_ratio,
-                                   values=["16:9", "5:4", "4:3", "3:2", "", "1:1","21:9","", "2:3", "3:4", "4:5", "9:16"],    
+                                   values=["16:9", "5:4", "4:3", "3:2", "", "1:1", "21:9", "", "2:3", "3:4", "4:5", "9:16"], # 空字符串表示分隔线，删除会导致用户不易分辨
                                    state="readonly", width=5, height=9999)
         aspect_combo.grid(row=0, column=1, sticky=tk.W)
         # 分辨率选择
@@ -869,8 +1068,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                                             values=["1K"], state="readonly", width=5)
         self.resolution_combo.grid(row=0, column=3, sticky=tk.W)
 
-        # 每次生成前确认参数
-        self.confirm_before_generate = tk.BooleanVar(value=True)
+        # 每次生成前确认参数（变量已在 __init__ 中定义，此处直接复用）
         ttk.Checkbutton(param_grid, text="生成前确认", variable=self.confirm_before_generate).grid(row=0, column=4, sticky=tk.W, padx=(10, 0))
 
         # 生成按钮（底部，自动调整大小）
@@ -964,6 +1162,16 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         
         # 首次启动时按回归函数设置左侧宽度
         self.root.after(50, self._apply_zoom)
+        
+        # 自动导入 default.toml（如存在）
+        if TOML_AVAILABLE:
+            default_toml = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "default.toml"
+            )
+            if os.path.isfile(default_toml):
+                self.root.after(100, lambda: self._import_toml_file(
+                    default_toml, is_auto_import=True
+                ))
         
         # 为提示词文本框添加右键菜单
         self._create_context_menu(self.prompt_text)
@@ -1171,14 +1379,19 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
 
     # 处理拖放事件：将拖入窗口的图片文件自动导入为参考图片
     def on_drop(self, event):
-        """处理拖放事件，将拖入的图片文件导入为参考图片"""
+        """处理拖放事件：优先检测 TOML 配置文件，否则导入图片"""
         # tkinterdnd2 传入的 event.data 通常为文件URL格式或路径列表，需解析
+        # 多文件格式示例：{C:\path with spaces\a.jpg} {C:\path\b.jpg}
         raw = event.data
+        toml_files = []
         supported_paths = []
         unsupported_exts = set()
-        # 以空格/换行分隔处理多个文件
-        for item in raw.split():
-            item = item.strip()
+        # 按花括号分组解析，避免带空格路径被空格拆散
+        import re
+        items = re.findall(r'\{([^}]*)\}|(\S+)', raw)
+        for match in items:
+            # re.findall 返回元组，取第一个非空分组
+            item = match[0] if match[0] else match[1]
             if not item:
                 continue
             # 去掉 file:// 前缀（如有）
@@ -1187,6 +1400,11 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             # 去掉花括号和引号
             item = item.strip('{}"')
             ext = os.path.splitext(item)[1].lower()
+            # --- TOML 配置文件检测 ---
+            if ext == '.toml':
+                toml_files.append(item)
+                continue
+            # --- 图片文件 ---
             if ext in ['.jpg', '.jpeg', '.png', '.webp']:
                 supported_paths.append(item)
             else:
@@ -1195,6 +1413,21 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 else:
                     # 无扩展名（如文件夹）标记为 "[文件夹]"
                     unsupported_exts.add("[文件夹]")
+
+        # --- TOML 配置文件优先处理 ---
+        if toml_files:
+            if supported_paths or unsupported_exts:
+                messagebox.showwarning("提示", "请分开导入图片和配置文件。")
+                return
+            if len(toml_files) > 1:
+                messagebox.showwarning("提示", "一次只可以拖入一个配置文件。")
+                return
+            if not TOML_AVAILABLE:
+                messagebox.showwarning("提示", "配置导入功能不可用，因为缺少 tomllib/tomli 库。")
+                return
+            self._import_toml_file(toml_files[0], is_auto_import=False)
+            return
+        # --- 以下为原有的图片导入逻辑 ---
         
         # 如果有不支持的格式，弹出确认对话框
         if unsupported_exts:
@@ -1254,6 +1487,319 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
         else:
             self.update_status("拖放内容中未找到有效的图片文件")
 
+    # ==================== TOML 配置文件解析与校验 ====================
+    def _parse_toml(self, filepath):
+        """解析 TOML 文件，返回 (config_dict, None) 或 (None, error_msg)"""
+        if not TOML_AVAILABLE:
+            return None, "缺少 tomllib/tomli 库，配置导入功能不可用"
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                raw = f.read()
+            config = tomllib.loads(raw)
+            return config, None
+        except Exception as e:
+            return None, f"TOML 解析失败: {str(e)}"
+
+    def _validate_reference_path(self, path):
+        """校验单个参考图片路径，返回 (is_valid, error_msg)"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # 解析路径：绝对路径直接用，否则相对于脚本目录
+        if os.path.isabs(path):
+            resolved = path
+        else:
+            resolved = os.path.join(script_dir, path)
+        resolved = os.path.normpath(resolved)
+        if not os.path.isfile(resolved):
+            return False, f"参考图片路径不存在: {path}"
+        ext = os.path.splitext(resolved)[1].lower()
+        if ext not in self.TOML_VALID_VALUES["valid_image_exts"]:
+            return False, f"参考图片格式不支持 ({ext}): {path}"
+        try:
+            img = Image.open(resolved)
+            img.verify()
+        except Exception as e:
+            return False, f"参考图片不是有效图片: {path} ({str(e)})"
+        return True, resolved
+
+    def _validate_toml_config(self, config_dict):
+        """校验 TOML 配置的所有字段，返回 (is_valid, errors_list)"""
+        errors = []
+
+        # ---- import_mode（必填）----
+        import_mode = config_dict.get("import_mode", None)
+        if not import_mode or not isinstance(import_mode, str):
+            errors.append("import_mode 不存在或为空")
+        elif import_mode not in self.TOML_VALID_VALUES["import_mode"]:
+            errors.append(f"import_mode 值不合法: {import_mode}")
+        valid_mode = (import_mode in self.TOML_VALID_VALUES["import_mode"]) if isinstance(import_mode, str) else False
+
+        # ---- [api] ----
+        api = config_dict.get("api", {})
+        if isinstance(api, dict):
+            # api.key：可为空字符串
+            api_key = api.get("key", None)
+            if api_key is not None and not isinstance(api_key, str):
+                errors.append("api.key 必须是字符串")
+            # api.model
+            model = api.get("model", None)
+            if model is not None:
+                if not isinstance(model, str) or model not in self.TOML_VALID_VALUES["model"]:
+                    errors.append(f"api.model 值不合法: {model}")
+        else:
+            if api is not None:
+                errors.append("[api] 段格式错误")
+
+        # ---- [generation] ----
+        gen = config_dict.get("generation", {})
+        if isinstance(gen, dict):
+            ar = gen.get("aspect_ratio", None)
+            if ar is not None:
+                if not isinstance(ar, str) or ar not in self.TOML_VALID_VALUES["aspect_ratio"]:
+                    errors.append(f"generation.aspect_ratio 值不合法: {ar}")
+            res = gen.get("resolution", None)
+            if res is not None:
+                if not isinstance(res, str) or res not in self.TOML_VALID_VALUES["resolution"]:
+                    errors.append(f"generation.resolution 值不合法: {res}")
+            nto = gen.get("network_timeout", None)
+            if nto is not None:
+                try:
+                    nto_int = int(nto)
+                    if nto_int < 0:
+                        errors.append(f"generation.network_timeout 不能为负数: {nto}")
+                except (ValueError, TypeError):
+                    errors.append(f"generation.network_timeout 格式错误: {nto}")
+            cbg = gen.get("confirm_before_generate", None)
+            if cbg is not None and not isinstance(cbg, bool):
+                errors.append("generation.confirm_before_generate 必须是 true/false")
+            ltf = gen.get("log_to_file", None)
+            if ltf is not None and not isinstance(ltf, bool):
+                errors.append("generation.log_to_file 必须是 true/false")
+        else:
+            if gen is not None:
+                errors.append("[generation] 段格式错误")
+
+        # ---- prompt（位于 [generation] 段内或顶层）----
+        prompt = config_dict.get("prompt", None)
+        if prompt is None and isinstance(gen, dict):
+            prompt = gen.get("prompt", None)
+        if prompt is not None and not isinstance(prompt, str):
+            errors.append("prompt 必须是字符串")
+
+        # ---- [ui] ----
+        ui = config_dict.get("ui", {})
+        if isinstance(ui, dict):
+            zoom = ui.get("zoom", None)
+            if zoom is not None:
+                if not isinstance(zoom, str) or zoom not in self.TOML_VALID_VALUES["zoom"]:
+                    errors.append(f"ui.zoom 值不合法: {zoom}")
+            pl = ui.get("prompt_lines", None)
+            if pl is not None:
+                try:
+                    pl_int = int(pl)
+                    if pl_int < 2 or pl_int > 98:
+                        errors.append(f"ui.prompt_lines 必须在 2~98 之间: {pl}")
+                except (ValueError, TypeError):
+                    errors.append(f"ui.prompt_lines 格式错误: {pl}")
+        else:
+            if ui is not None:
+                errors.append("[ui] 段格式错误")
+
+        # ---- [[reference_images]] ----
+        refs = config_dict.get("reference_images", [])
+        if refs and isinstance(refs, list):
+            for i, ref in enumerate(refs):
+                if isinstance(ref, dict):
+                    path = ref.get("path", "")
+                    if not path:
+                        continue
+                    is_ok, msg = self._validate_reference_path(path)
+                    if not is_ok:
+                        errors.append(msg)
+                else:
+                    errors.append(f"reference_images[{i}] 格式错误")
+
+        return (len(errors) == 0, errors)
+
+    # ==================== TOML 配置应用 ====================
+    def _reset_all_to_defaults(self):
+        """将所有可配置项恢复到默认值"""
+        defaults = self.TOML_DEFAULTS
+        self.api_key.set(defaults["api_key"])
+        self.model_var.set(defaults["model"])
+        self.aspect_ratio.set(defaults["aspect_ratio"])
+        self.resolution.set(defaults["resolution"])
+        self.network_timeout.set(defaults["network_timeout"])
+        self.confirm_before_generate.set(defaults["confirm_before_generate"])
+        self.log_to_file.set(defaults["log_to_file"])
+        self.zoom_var.set(defaults["zoom"])
+        self.line_count_var.set(defaults["prompt_lines"])
+        self.prompt_text.delete("1.0", tk.END)
+        self.prompt_text.config(height=defaults["prompt_lines"])
+        self.reference_images.clear()
+        self.ref_canvas.delete("all")
+        self.update_ref_count_label()
+        self.last_verified_params = None
+        self.on_model_change()
+        self._apply_zoom()
+
+    def _apply_toml_config(self, config_dict, mode):
+        """根据模式将 TOML 配置写入 UI 控件"""
+        if mode == "clear_and_overwrite":
+            self._reset_all_to_defaults()
+
+        # ---- [api] ----
+        api = config_dict.get("api", {})
+        if isinstance(api, dict):
+            if "key" in api:
+                self.api_key.set(str(api["key"]) if api["key"] is not None else "")
+            if "model" in api and api["model"]:
+                self.model_var.set(str(api["model"]))
+
+        # ---- [generation] ----
+        gen = config_dict.get("generation", {})
+        if isinstance(gen, dict):
+            if "aspect_ratio" in gen and gen["aspect_ratio"]:
+                self.aspect_ratio.set(str(gen["aspect_ratio"]))
+            if "resolution" in gen and gen["resolution"]:
+                self.resolution.set(str(gen["resolution"]))
+            if "network_timeout" in gen:
+                self.network_timeout.set(str(gen["network_timeout"]))
+            if "confirm_before_generate" in gen:
+                self.confirm_before_generate.set(bool(gen["confirm_before_generate"]))
+            if "log_to_file" in gen:
+                self.log_to_file.set(bool(gen["log_to_file"]))
+
+        # ---- prompt（位于 [generation] 段内或顶层）----
+        prompt_val = config_dict.get("prompt", None)
+        if prompt_val is None and isinstance(gen, dict):
+            prompt_val = gen.get("prompt", None)
+        if prompt_val is not None:
+            self.prompt_text.delete("1.0", tk.END)
+            if prompt_val:
+                self.prompt_text.insert("1.0", str(prompt_val))
+
+        # ---- [ui] ----
+        ui = config_dict.get("ui", {})
+        zoom_changed = False
+        if isinstance(ui, dict):
+            if "zoom" in ui and ui["zoom"]:
+                new_zoom = str(ui["zoom"])
+                if self.zoom_var.get() != new_zoom:
+                    zoom_changed = True
+                self.zoom_var.set(new_zoom)
+            if "prompt_lines" in ui:
+                lines = int(ui["prompt_lines"])
+                self.line_count_var.set(lines)
+                self.prompt_text.config(height=lines)
+
+        # ---- [[reference_images]] ----
+        refs = config_dict.get("reference_images", None)
+        if refs is not None and isinstance(refs, list):
+            self.reference_images.clear()
+            for ref in refs:
+                if isinstance(ref, dict):
+                    path = ref.get("path", "")
+                    if not path:
+                        continue
+                    is_ok, resolved = self._validate_reference_path(path)
+                    if not is_ok:
+                        continue
+                    try:
+                        mime_type = self.get_mime_type(resolved)
+                        with open(resolved, "rb") as f:
+                            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+                        original_img = Image.open(resolved)
+                        self.reference_images.append(
+                            (resolved, image_b64, mime_type, original_img)
+                        )
+                    except Exception:
+                        continue
+            self.update_reference_preview()
+
+        # UI 同步
+        self.on_model_change()
+        if zoom_changed:
+            self._apply_zoom()
+            self._update_model_combo_width()
+
+    def _import_toml_file(self, filepath, is_auto_import=False):
+        """导入 TOML 配置文件的主入口
+
+        参数:
+            filepath: TOML 文件路径
+            is_auto_import: True 表示由 default.toml 自动触发，跳过确认弹窗
+        """
+        if not TOML_AVAILABLE:
+            self.update_status("配置导入失败: 缺少 tomllib/tomli 库")
+            return
+
+        basename = os.path.basename(filepath)
+
+        # 1. 解析
+        config, parse_err = self._parse_toml(filepath)
+        if config is None:
+            self.update_status(f"配置导入失败 ({basename}): {parse_err}")
+            messagebox.showerror("配置文件错误",
+                f"您导入的配置文件无效，因为格式错误、不是配置文件，或者其它未知错误。\n\n详情: {parse_err}")
+            return
+
+        # 2. 提取 import_mode
+        import_mode = config.get("import_mode", None)
+        if not import_mode or not isinstance(import_mode, str) or \
+           import_mode not in self.TOML_VALID_VALUES["import_mode"]:
+            self.update_status(f"配置导入失败 ({basename}): import_mode 无效")
+            messagebox.showerror("配置文件错误",
+                "您导入的配置文件无效，因为格式错误、不是配置文件，或者其它未知错误。")
+            return
+
+        # 3. 校验所有字段
+        is_valid, errors = self._validate_toml_config(config)
+        file_label = f"[自动导入] {basename}" if is_auto_import else basename
+
+        # 4. 按模式分流
+        if import_mode == "clear_and_overwrite":
+            if not is_valid:
+                self.update_status(f"配置导入失败 ({file_label}): 存在 {len(errors)} 处错误")
+                err_text = "\n".join(f"  - {e}" for e in errors[:10])
+                if len(errors) > 10:
+                    err_text += f"\n  ... 还有 {len(errors) - 10} 处错误"
+                messagebox.showerror("配置文件校验失败",
+                    f"配置文件存在 {len(errors)} 处错误，已拒绝导入以保护数据安全。\n\n{err_text}")
+                return
+            # 无错误：确认弹窗（自动导入时跳过）
+            if not is_auto_import:
+                if not messagebox.askyesno("确认导入配置",
+                        "这会清空全部内容，然后应用配置文件。\n此操作无法撤销，是否继续？"):
+                    self.update_status(f"用户取消配置导入: {basename}")
+                    return
+            self._apply_toml_config(config, "clear_and_overwrite")
+            self.update_status(f"已导入配置文件 ({file_label}) — 模式: 清空并覆盖")
+
+        elif import_mode == "overwrite_existing":
+            if not is_valid:
+                err_text = "\n".join(f"  - {e}" for e in errors[:10])
+                if len(errors) > 10:
+                    err_text += f"\n  ... 还有 {len(errors) - 10} 处错误"
+                user_choice = messagebox.askyesno("配置文件校验失败",
+                    f"配置文件存在 {len(errors)} 处错误。\n\n{err_text}\n\n是否强行导入（跳过错误项）？\n选「是」强行导入，「否」取消全部导入。")
+                if user_choice:
+                    self._apply_toml_config(config, "overwrite_existing")
+                    self.update_status(
+                        f"已部分导入配置文件 ({file_label}) — 模式: 覆盖已有（跳过 {len(errors)} 处错误）")
+                else:
+                    self.update_status(f"用户取消配置导入: {basename}")
+                return
+            # 无错误：确认弹窗（自动导入时跳过）
+            if not is_auto_import:
+                if not messagebox.askyesno("确认导入配置",
+                        "这会应用配置文件里已有的配置（值留空的配置项一样会被清空），"
+                        "没有写的配置不会改变。\n此操作无法撤销，是否继续？"):
+                    self.update_status(f"用户取消配置导入: {basename}")
+                    return
+            self._apply_toml_config(config, "overwrite_existing")
+            self.update_status(f"已导入配置文件 ({file_label}) — 模式: 覆盖已有")
+
+    # ==================== 原有方法 ====================
     def update_ref_count_label(self):
         """更新参考图片计数标签"""
         self.ref_count_label.config(
@@ -1475,22 +2021,25 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
     # 后台线程生成图片 (GPT Image 2 VIP)
     def _generate_thread_gpt_vip(self, api_key, prompt):
         """后台线程执行GPT Image 2 VIP API调用"""
+        # 获取超时设置
+        timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
+        timeout = None if timeout_val == 0 else timeout_val
+        
+        # 计算size参数
+        aspect = self.aspect_ratio.get()
+        resolution = self.resolution.get()
+        size = self.VIP_SIZE_MAP.get(aspect, {}).get(resolution, "2048x2048")
+        
+        base_url = self.get_api_url()
+        headers = {
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        full_url = None
+        response = None
+        opened_files = []
+        
         try:
-            # 获取超时设置
-            timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
-            timeout = None if timeout_val == 0 else timeout_val
-            
-            # 计算size参数
-            aspect = self.aspect_ratio.get()
-            resolution = self.resolution.get()
-            size = self.VIP_SIZE_MAP.get(aspect, {}).get(resolution, "2048x2048")
-            
-            base_url = self.get_api_url()
-            headers = {
-                "Authorization": f"Bearer {api_key}"
-            }
-            
-            full_url = None
             # 有参考图片时调用 edits，否则调用 generations
             if self.reference_images:
                 # 图改图：使用 multipart/form-data
@@ -1503,7 +2052,9 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                 }
                 # 发送所有参考图片
                 for filepath, _, mime_type, _ in self.reference_images:
-                    files.append(("image", (os.path.basename(filepath), open(filepath, "rb"), mime_type)))
+                    f = open(filepath, "rb")
+                    opened_files.append(f)
+                    files.append(("image", (os.path.basename(filepath), f, mime_type)))
                 
                 response = requests.post(
                     full_url,
@@ -1512,10 +2063,6 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
                     files=files,
                     timeout=timeout
                 )
-                
-                # 关闭文件句柄
-                for _, file_tuple in files:
-                    file_tuple[1].close()
             else:
                 # 文生图：使用 JSON
                 full_url = f"{base_url}/images/generations"
@@ -1539,6 +2086,13 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             self.root.after(0, self._handle_response_gpt_vip, response, full_url, gpt_endpoint_type)
         except Exception as e:
             self.root.after(0, self._handle_error, str(e), full_url if full_url else base_url)
+        finally:
+            # 确保所有打开的文件句柄都被关闭
+            for f in opened_files:
+                try:
+                    f.close()
+                except Exception:
+                    pass
     # 处理API响应 (NanoBanana)
     def _handle_response(self, response, url=None, actual_image_size=None):
         """处理NanoBanana API响应"""
@@ -2203,10 +2757,12 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             print(f"日志记录失败: {e}")
     # 验证超时输入
     def _validate_timeout(self, value):
-        """验证超时输入：只允许自然数"""
-        if value == "" or value == "0":
+        """验证超时输入：只允许非负整数（空字符串临时允许输入，但会回退到默认值）"""
+        if value == "":
             return True
-        return value.isdigit() and int(value) >= 0
+        if not value.isdigit():
+            return False
+        return int(value) >= 0
     # 日志开关切换处理
     def on_log_toggle(self):
         """日志开关切换时的处理"""
@@ -2281,6 +2837,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
             'confirm_before_generate': self.confirm_before_generate.get(),
             'reference_images': self.reference_images.copy(),
             'current_image_data': self.current_image_data,
+            'current_image_mime_type': getattr(self, 'current_image_mime_type', 'image/png'),
             'current_image_model': getattr(self, 'current_image_model', None),
             'last_raw_response': self.last_raw_response,
             'response_text': self.response_text.get("1.0", tk.END).strip(),
@@ -2621,6 +3178,15 @@ def main():
     os.chdir(script_dir)
     print(f"工作目录已切换到: {os.getcwd()}")
     # ===================================================
+
+    # 设置独立 AppUserModelID，每次启动生成唯一ID，防止任务栏合并窗口（仅 Windows）
+    if platform.system() == "Windows":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"laozhang.nanobanana.{os.getpid()}"
+            )
+        except Exception:
+            pass
     
     if TKINTERDND2_AVAILABLE:
         root = tkinterdnd2.TkinterDnD.Tk()
