@@ -1,4 +1,5 @@
 ﻿# ====================================================
+#    老张API - Nano Banana 和 GPT image 2 图片生成器
 #         警告：不要直接在顶部导入"第三方"依赖！
 # 请按照说明，使用正确的方法添加新的依赖，确保防呆机制生效
 # ====================================================
@@ -308,6 +309,21 @@ import ctypes
 import tempfile
 import random
 
+# 尝试导入文件选择器组件（chooser-文件选择器.py）
+CHOOSER_AVAILABLE = False
+FileBrowserDialog = None
+try:
+    import importlib.util
+    _chooser_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chooser-文件选择器.py")
+    _chooser_spec = importlib.util.spec_from_file_location("file_chooser", _chooser_path)
+    if _chooser_spec and _chooser_spec.loader:
+        _chooser_module = importlib.util.module_from_spec(_chooser_spec)
+        _chooser_spec.loader.exec_module(_chooser_module)
+        FileBrowserDialog = _chooser_module.FileBrowserDialog
+        CHOOSER_AVAILABLE = True
+except Exception:
+    pass
+
 # Windows 任务栏进度条支持
 if platform.system() == "Windows":
     try:
@@ -347,8 +363,9 @@ class GeminiImageGenerator:
         "aspect_ratio": ["16:9", "5:4", "4:3", "3:2", "1:1", "21:9", "2:3", "3:4", "4:5", "9:16"],
         "resolution": ["1K", "2K", "4K"],
         "zoom": ["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"],
-        "valid_image_exts": [".jpg", ".jpeg", ".png", ".webp"],
     }
+    # 可接受的图片扩展名
+    VALID_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"]
     # 默认值（与 __init__ 中初始化一致）
     TOML_DEFAULTS = {
         "api_key": "",
@@ -517,10 +534,14 @@ import_mode = "overwrite_existing"
 #########################【API配置】#########################
 [api]
 # 【API密钥】
-# 调用API接口的密钥。
-# 示例：key = "sk-123456789abcdefghijklmno1234567890abcdef12345678"
+# 调用API接口的密钥。支持多平台密钥共存，方便不同平台版本的脚本共用同一份toml。
+# 旧版的“key”变量已被弃用，但脚本仍然做了兼容，建议更改为新版。
+# 示例：
+# key_laozhang = "sk-123456789abcdefghijklmno1234567890abcdef12345678"
+# key_1234 = "sk-abcdefg123456789hijk123451234lmno567867890abcdef"
+# key_abcde = "sk-12345abcdefghijk67891234lmno567812345abcdef67890"
 
-key = ""
+key_laozhang = ""
 
 # ------------------------------------------------------------
 
@@ -605,7 +626,7 @@ zoom = "125%"
 prompt_lines = 4
 
 ######################## 【参考图片】 ########################
-# 程序启动时自动加载的参考图片路径列表。如果留空，会导致程序报错，建议不用时加上"#"注释掉，或者后续再添加。
+# 程序启动时自动加载的参考图片路径列表。如果留空（如 path = ""），将自动跳过，建议不用时加上"#"注释掉，或者后续再添加。
 # 支持导入多张图片，程序会自动把它们放在一起作为参考图输入给模型。
 # 使用 [[reference_images]] 添加多张，每张一个 path 字段，详见示例。
 # 支持绝对路径（完整的图片路径）和相对路径（相对于脚本所在目录），但是新手不建议用相对路径。
@@ -725,6 +746,11 @@ path = ""
         self.slider_fail_count = 0
         # 保底弹窗锁定状态（触发后永久锁定）
         self.fallback_locked = False
+
+        # 文件选择器开关（默认关闭）
+        self.use_file_chooser = tk.BooleanVar(value=False)
+        # 文件选择器上次浏览路径
+        self.last_chooser_path = None
 
                 # 构建UI
         self.setup_ui()
@@ -1034,11 +1060,15 @@ path = ""
         ref_btn_frame = ttk.Frame(self.ref_frame)
         ref_btn_frame.pack(fill=tk.X)
         # 添加图片和清空按钮
-        ttk.Button(ref_btn_frame, text="添加图片", command=self.add_images, width=12).pack(side=tk.LEFT)
-        ttk.Button(ref_btn_frame, text="清空全部", command=self.clear_images, width=12).pack(side=tk.LEFT, padx=10)
+        ttk.Button(ref_btn_frame, text="添加…", command=self.add_images).pack(side=tk.LEFT)
+        ttk.Button(ref_btn_frame, text="清空", command=self.clear_images).pack(side=tk.LEFT, padx=5)
+        # 文件选择器开关
+        self.chooser_check = ttk.Checkbutton(ref_btn_frame, text="外部选择器",
+            variable=self.use_file_chooser)
+        self.chooser_check.pack(side=tk.LEFT, padx=5)
         # 参考图片计数标签
         self.ref_count_label = ttk.Label(ref_btn_frame, text="已选择: 0/14张", font=("TkDefaultFont", 9, "bold"))
-        self.ref_count_label.pack(side=tk.LEFT, padx=20)
+        self.ref_count_label.pack(side=tk.LEFT, padx=5)
         # 参考图片预览区域（带水平滚动条）
         ref_canvas_container = ttk.Frame(self.ref_frame)
         ref_canvas_container.pack(fill=tk.X, pady=5, expand=True)
@@ -1163,15 +1193,16 @@ path = ""
         # 首次启动时按回归函数设置左侧宽度
         self.root.after(50, self._apply_zoom)
         
-        # 自动导入 default.toml（如存在）
+        # 自动导入 default.toml（如存在）- 窗口显示后触发一次
         if TOML_AVAILABLE:
             default_toml = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "default.toml"
             )
             if os.path.isfile(default_toml):
-                self.root.after(100, lambda: self._import_toml_file(
-                    default_toml, is_auto_import=True
-                ))
+                def _auto_import_default_toml(event=None):
+                    self.root.unbind("<Map>")
+                    self._import_toml_file(default_toml, is_auto_import=True)
+                self.root.bind("<Map>", _auto_import_default_toml)
         
         # 为提示词文本框添加右键菜单
         self._create_context_menu(self.prompt_text)
@@ -1320,11 +1351,40 @@ path = ""
                                      为None时弹出文件对话框
         """
         if filepaths_without_dialog is None:
-            # 打开文件对话框选择图片
-            filepaths = filedialog.askopenfilenames(
-                title="选择参考图片",
-                filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")]
-            )
+            # 如果开启文件选择器且可用，则使用自定义文件选择器
+            if self.use_file_chooser.get():
+                if not CHOOSER_AVAILABLE:
+                    messagebox.showerror("错误",
+                        "文件选择组件未找到。\n"
+                        "请确保 “chooser-文件选择器.py” 与本脚本放在同一目录下。")
+                    return
+                result_holder = []
+                def _on_chooser_select(files, last_path):
+                    result_holder.extend(files)
+                    self.last_chooser_path = last_path
+                zoom_str = self.zoom_var.get().rstrip('%')
+                try:
+                    zoom_val = int(zoom_str) / 100.0
+                except ValueError:
+                    zoom_val = 1.0
+                dialog = FileBrowserDialog(
+                    self.root,
+                    initial_path=self.last_chooser_path,
+                    multi_select=True,
+                    last_path=self.last_chooser_path,
+                    on_select=_on_chooser_select,
+                    on_cancel=lambda: None,
+                    zoom=zoom_val,
+                    filetypes=['.jpg', '.jpeg', '.png', '.webp']
+                )
+                self.root.wait_window(dialog)
+                filepaths = result_holder
+            else:
+                # 打开原生文件对话框选择图片
+                filepaths = filedialog.askopenfilenames(
+                    title="选择参考图片",
+                    filetypes=[("图片文件", "*.jpg *.jpeg *.png *.webp"), ("所有文件", "*.*")]
+                )
         else:
             # 拖放导入：直接使用传入的文件路径列表，过滤非图片文件和不存在的文件
             filepaths = [
@@ -1512,7 +1572,7 @@ path = ""
         if not os.path.isfile(resolved):
             return False, f"参考图片路径不存在: {path}"
         ext = os.path.splitext(resolved)[1].lower()
-        if ext not in self.TOML_VALID_VALUES["valid_image_exts"]:
+        if ext not in self.VALID_IMAGE_EXTENSIONS:
             return False, f"参考图片格式不支持 ({ext}): {path}"
         try:
             img = Image.open(resolved)
@@ -1536,10 +1596,13 @@ path = ""
         # ---- [api] ----
         api = config_dict.get("api", {})
         if isinstance(api, dict):
-            # api.key：可为空字符串
+            # api.key 或 api.key_laozhang：可为空字符串
             api_key = api.get("key", None)
             if api_key is not None and not isinstance(api_key, str):
                 errors.append("api.key 必须是字符串")
+            api_key_laozhang = api.get("key_laozhang", None)
+            if api_key_laozhang is not None and not isinstance(api_key_laozhang, str):
+                errors.append("api.key_laozhang 必须是字符串")
             # api.model
             model = api.get("model", None)
             if model is not None:
@@ -1650,8 +1713,22 @@ path = ""
         # ---- [api] ----
         api = config_dict.get("api", {})
         if isinstance(api, dict):
-            if "key" in api:
-                self.api_key.set(str(api["key"]) if api["key"] is not None else "")
+            if "key_laozhang" in api:
+                self.api_key.set(str(api["key_laozhang"]) if api["key_laozhang"] is not None else "")
+                if "key" in api and api.get("key"):
+                    msg = "检测到同时包含新版格式“key_laozhang”和旧版格式“key”，已自动使用新版"
+                    print(f"[提示] {msg}")
+                    self.update_status(msg)
+            elif "key" in api:
+                old_key_value = str(api["key"]) if api["key"] is not None else ""
+                if old_key_value:
+                    choice = self._show_old_key_dialog(old_key_value, "key_laozhang", "key")
+                    if choice == "force":
+                        self.api_key.set(old_key_value)
+                    elif choice == "manual":
+                        self.api_key.set("")
+                else:
+                    self.api_key.set("")
             if "model" in api and api["model"]:
                 self.model_var.set(str(api["model"]))
 
@@ -2412,6 +2489,63 @@ path = ""
         
         self.root.wait_window(dialog)
         return result
+
+    # 旧版密钥检测弹窗
+    def _show_old_key_dialog(self, old_key_value, new_var_name, old_var_name):
+        """显示旧版密钥检测弹窗，返回用户选择"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("旧版密钥检测")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        suffix = old_key_value[-6:] if len(old_key_value) >= 6 else old_key_value
+
+        message = (
+            f"该脚本已启用最新版本的【{new_var_name}】变量，\n"
+            f"旧版变量【{old_var_name}】已弃用，\n"
+            f"推荐您尽快更改变量名以兼容新版key。\n\n"
+            f"是否强制导入旧版变量存储的key？\n"
+            f"当前存储的key是：\n  ****{suffix}"
+        )
+
+        result = {"choice": "skip"}
+
+        label = tk.Label(dialog, text=message, justify=tk.LEFT, wraplength=400, padx=20, pady=15)
+        label.pack(fill=tk.BOTH, expand=True)
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+
+        def on_force():
+            result["choice"] = "force"
+            dialog.destroy()
+
+        def on_skip():
+            result["choice"] = "skip"
+            dialog.destroy()
+
+        def on_manual():
+            result["choice"] = "manual"
+            dialog.destroy()
+
+        force_btn = ttk.Button(btn_frame, text="强制导入", command=on_force)
+        force_btn.pack(fill=tk.X, pady=2)
+        skip_btn = ttk.Button(btn_frame, text="不导入", command=on_skip)
+        skip_btn.pack(fill=tk.X, pady=2)
+        manual_btn = ttk.Button(btn_frame, text="我自己写密钥", command=on_manual)
+        manual_btn.pack(fill=tk.X, pady=2)
+
+        dialog.protocol("WM_DELETE_WINDOW", on_skip)
+
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
+        y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        self.root.wait_window(dialog)
+        return result["choice"]
     # 优化显示数据
     def _optimize_display_data(self, data, max_str_len=500):
         """**改进：统一处理数据优化，避免重复检测**"""
