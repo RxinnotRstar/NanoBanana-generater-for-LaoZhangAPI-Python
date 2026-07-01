@@ -308,19 +308,23 @@ import io
 import ctypes
 import tempfile
 import random
+import glob
 
-# 尝试导入文件选择器组件（chooser-文件选择器.py）
+# 尝试导入文件选择器组件（chooser-文件选择器*.py）
 CHOOSER_AVAILABLE = False
 FileBrowserDialog = None
 try:
     import importlib.util
-    _chooser_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chooser-文件选择器.py")
-    _chooser_spec = importlib.util.spec_from_file_location("file_chooser", _chooser_path)
-    if _chooser_spec and _chooser_spec.loader:
-        _chooser_module = importlib.util.module_from_spec(_chooser_spec)
-        _chooser_spec.loader.exec_module(_chooser_module)
-        FileBrowserDialog = _chooser_module.FileBrowserDialog
-        CHOOSER_AVAILABLE = True
+    _chooser_dir = os.path.dirname(os.path.abspath(__file__))
+    _chooser_files = glob.glob(os.path.join(_chooser_dir, "chooser-文件选择器*.py"))
+    if _chooser_files:
+        _chooser_path = max(_chooser_files, key=os.path.getmtime)
+        _chooser_spec = importlib.util.spec_from_file_location("file_chooser", _chooser_path)
+        if _chooser_spec and _chooser_spec.loader:
+            _chooser_module = importlib.util.module_from_spec(_chooser_spec)
+            _chooser_spec.loader.exec_module(_chooser_module)
+            FileBrowserDialog = _chooser_module.FileBrowserDialog
+            CHOOSER_AVAILABLE = True
 except Exception:
     pass
 
@@ -358,7 +362,7 @@ class GeminiImageGenerator:
     # 各字段合法枚举值
     TOML_VALID_VALUES = {
         "import_mode": ["clear_and_overwrite", "overwrite_existing"],
-        "model": ["gemini-2.5-flash-image", "gemini-3-pro-image-preview",
+        "model_laozhang": ["gemini-2.5-flash-image", "gemini-3-pro-image-preview",
                   "gemini-3.1-flash-image-preview", "gpt-image-2-vip"],
         "aspect_ratio": ["16:9", "5:4", "4:3", "3:2", "1:1", "21:9", "2:3", "3:4", "4:5", "9:16"],
         "resolution": ["1K", "2K", "4K"],
@@ -369,7 +373,7 @@ class GeminiImageGenerator:
     # 默认值（与 __init__ 中初始化一致）
     TOML_DEFAULTS = {
         "api_key": "",
-        "model": "gemini-3.1-flash-image-preview",
+        "model_laozhang": "gemini-3.1-flash-image-preview",
         "aspect_ratio": "1:1",
         "resolution": "4K",
         "network_timeout": "1200",
@@ -550,7 +554,7 @@ key_laozhang = ""
 # "gemini-2.5-flash-image", "gemini-3-pro-image-preview",
 # "gemini-3.1-flash-image-preview", "gpt-image-2-vip"
 
-model = "gemini-3.1-flash-image-preview"
+model_laozhang = "gemini-3.1-flash-image-preview"
 
 #########################【生成参数】#########################
 
@@ -561,7 +565,7 @@ model = "gemini-3.1-flash-image-preview"
 # 特殊——"1:1", "21:9",
 # 横版——"2:3", "3:4", "4:5", "9:16"
 
-aspect_ratio = "4:3"
+aspect_ratio = "1:1"
 
 # ------------------------------------------------------------
 
@@ -569,14 +573,14 @@ aspect_ratio = "4:3"
 # 可选值: "1K", "2K", "4K"
 # 注意: gemini-2.5-flash-image 仅支持 "1K"
 
-resolution = "2K"
+resolution = "4K"
 
 # ------------------------------------------------------------
 
 # 【网络超时时间】
 # 单位：秒，0表示无限制，默认1200秒
 
-network_timeout = 1800
+network_timeout = 1200
 
 # ------------------------------------------------------------
 
@@ -1184,7 +1188,6 @@ path = ""
                   command=self.show_full_data, width=18).pack(side=tk.LEFT, padx=10)
         # 设置只读模式，阻止编辑但允许选择和复制
         self.response_text.bind('<Key>', lambda e: "break")
-        self.response_text.bind('<Button-1>', lambda e: "break")
         self._create_context_menu(self.response_text)
 
         # 根据当前模型更新UI状态，确保启动时分辨率选项正确
@@ -1356,7 +1359,7 @@ path = ""
                 if not CHOOSER_AVAILABLE:
                     messagebox.showerror("错误",
                         "文件选择组件未找到。\n"
-                        "请确保 “chooser-文件选择器.py” 与本脚本放在同一目录下。")
+                        "请确保 “chooser-文件选择器*.py” 与本脚本放在同一目录下。")
                     return
                 result_holder = []
                 def _on_chooser_select(files, last_path):
@@ -1603,11 +1606,15 @@ path = ""
             api_key_laozhang = api.get("key_laozhang", None)
             if api_key_laozhang is not None and not isinstance(api_key_laozhang, str):
                 errors.append("api.key_laozhang 必须是字符串")
-            # api.model
-            model = api.get("model", None)
-            if model is not None:
-                if not isinstance(model, str) or model not in self.TOML_VALID_VALUES["model"]:
-                    errors.append(f"api.model 值不合法: {model}")
+            # api.model_laozhang
+            model_lz = api.get("model_laozhang", None)
+            if model_lz is not None:
+                if not isinstance(model_lz, str) or model_lz not in self.TOML_VALID_VALUES["model_laozhang"]:
+                    errors.append(f"api.model_laozhang 值不合法: {model_lz}")
+            # api.model (旧版，兼容)
+            api_model = api.get("model", None)
+            if api_model is not None and not isinstance(api_model, str):
+                errors.append("api.model 必须是字符串")
         else:
             if api is not None:
                 errors.append("[api] 段格式错误")
@@ -1688,7 +1695,7 @@ path = ""
         """将所有可配置项恢复到默认值"""
         defaults = self.TOML_DEFAULTS
         self.api_key.set(defaults["api_key"])
-        self.model_var.set(defaults["model"])
+        self.model_var.set(defaults["model_laozhang"])
         self.aspect_ratio.set(defaults["aspect_ratio"])
         self.resolution.set(defaults["resolution"])
         self.network_timeout.set(defaults["network_timeout"])
@@ -1729,8 +1736,34 @@ path = ""
                         self.api_key.set("")
                 else:
                     self.api_key.set("")
-            if "model" in api and api["model"]:
-                self.model_var.set(str(api["model"]))
+            if "model_laozhang" in api:
+                model_val = str(api["model_laozhang"]) if api["model_laozhang"] is not None else ""
+                if model_val:
+                    valid_models = self.TOML_VALID_VALUES.get("model_laozhang", [])
+                    if model_val in valid_models:
+                        self.model_var.set(model_val)
+                    else:
+                        self.update_status(f"配置中的 model_laozhang 值不合法 ({model_val})，已跳过")
+                if "model" in api and api.get("model"):
+                    msg = "检测到同时包含新版格式“model_laozhang”和旧版格式“model”，已自动使用新版"
+                    print(f"[提示] {msg}")
+                    self.update_status(msg)
+            elif "model" in api:
+                old_model_value = str(api["model"]) if api["model"] is not None else ""
+                if old_model_value:
+                    choice = self._show_old_key_dialog(old_model_value, "model_laozhang", "model", mask=False)
+                    if choice == "force":
+                        valid_models = self.TOML_VALID_VALUES.get("model_laozhang", [])
+                        if old_model_value in valid_models:
+                            self.model_var.set(old_model_value)
+                        else:
+                            msg = f"旧版 model 值 ({old_model_value}) 不是有效模型，已跳过"
+                            print(f"[提示] {msg}")
+                            self.update_status(msg)
+                    elif choice == "manual":
+                        self.model_var.set(self.TOML_DEFAULTS["model_laozhang"])
+                else:
+                    self.model_var.set(self.TOML_DEFAULTS["model_laozhang"])
 
         # ---- [generation] ----
         gen = config_dict.get("generation", {})
@@ -2490,24 +2523,32 @@ path = ""
         self.root.wait_window(dialog)
         return result
 
-    # 旧版密钥检测弹窗
-    def _show_old_key_dialog(self, old_key_value, new_var_name, old_var_name):
-        """显示旧版密钥检测弹窗，返回用户选择"""
+    # 旧版配置项检测弹窗（兼容 key 和 model 等）
+    def _show_old_key_dialog(self, old_key_value, new_var_name, old_var_name, mask=True):
+        """显示旧版配置项检测弹窗，返回用户选择
+        
+        参数:
+            mask: True 时对值进行脱敏显示（用于密钥），False 时显示完整值（用于模型等）
+        """
         dialog = tk.Toplevel(self.root)
-        dialog.title("旧版密钥检测")
+        dialog.title("旧版配置检测")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
         dialog.bind("<Escape>", lambda e: dialog.destroy())
 
-        suffix = old_key_value[-6:] if len(old_key_value) >= 6 else old_key_value
+        if mask:
+            suffix = old_key_value[-6:] if len(old_key_value) >= 6 else old_key_value
+            display_value = f"****{suffix}"
+        else:
+            display_value = old_key_value
 
         message = (
             f"该脚本已启用最新版本的【{new_var_name}】变量，\n"
             f"旧版变量【{old_var_name}】已弃用，\n"
-            f"推荐您尽快更改变量名以兼容新版key。\n\n"
-            f"是否强制导入旧版变量存储的key？\n"
-            f"当前存储的key是：\n  ****{suffix}"
+            f"推荐您尽快更改配置以兼容新版。\n\n"
+            f"是否强制导入旧版变量存储的值？\n"
+            f"当前存储的值是：\n  {display_value}"
         )
 
         result = {"choice": "skip"}
@@ -2534,7 +2575,7 @@ path = ""
         force_btn.pack(fill=tk.X, pady=2)
         skip_btn = ttk.Button(btn_frame, text="不导入", command=on_skip)
         skip_btn.pack(fill=tk.X, pady=2)
-        manual_btn = ttk.Button(btn_frame, text="我自己写密钥", command=on_manual)
+        manual_btn = ttk.Button(btn_frame, text="手动填写", command=on_manual)
         manual_btn.pack(fill=tk.X, pady=2)
 
         dialog.protocol("WM_DELETE_WINDOW", on_skip)
