@@ -157,7 +157,10 @@ class FileBrowserDialog(tk.Toplevel):
         self.sort_key = "name"
         self.sort_reverse = False
         self.all_entries = []
-        self.thumb_widgets = {}
+        self._thumb_items = {}  # idx -> {bg_id, img_id, text_id, photo_ref, loaded}
+        self._thumb_cols = 1
+        self._thumb_item_w = self._s(110)
+        self._thumb_item_h = self._s(110)
 
         self._nav_back_stack = []
         self._nav_forward_stack = []
@@ -167,6 +170,8 @@ class FileBrowserDialog(tk.Toplevel):
         self._blink_on = False
         self._thumb_cancel_token = 0
         self._thumb_lock = threading.Lock()
+        self._thumb_visible_range = (0, 0)
+        self._thumb_loader_token = 0
         self._batch_timer = None
         self._configure_timer = None
         self._batch_insert_token = 0
@@ -264,8 +269,9 @@ class FileBrowserDialog(tk.Toplevel):
 
         # 缩略图视图
         self.thumb_canvas = tk.Canvas(right_frame, bg="white", highlightthickness=0)
-        self.thumb_scroll = tk.Scrollbar(right_frame, orient=tk.VERTICAL, command=self.thumb_canvas.yview)
+        self.thumb_scroll = tk.Scrollbar(right_frame, orient=tk.VERTICAL)
         self.thumb_canvas.configure(yscrollcommand=self.thumb_scroll.set)
+        self.thumb_scroll.config(command=self._on_thumb_scrollbar)
 
         self.thumb_inner = tk.Frame(self.thumb_canvas, bg="white")
         self.thumb_canvas.create_window((0, 0), window=self.thumb_inner, anchor="nw")
@@ -345,13 +351,13 @@ class FileBrowserDialog(tk.Toplevel):
 
         self.file_list.delete(*self.file_list.get_children())
         self.file_list.selection_set()
-        for widget in self.thumb_inner.winfo_children():
-            widget.destroy()
+        self.thumb_canvas.delete("all")
         self.thumbnail_cache.clear()
-        self.thumb_widgets.clear()
+        self._thumb_items.clear()
         self._stop_blink_anchor()
         self._cancel_batch_timer()
         self._thumb_cancel_token += 1
+        self._thumb_loader_token += 1
         self.selected_items.clear()
         self._range_anchor = None
 
@@ -431,90 +437,253 @@ class FileBrowserDialog(tk.Toplevel):
                           reverse=self.sort_reverse)
         return entries
 
-    def _show_thumbnails(self):
-        for widget in self.thumb_inner.winfo_children():
-            widget.destroy()
-        self.thumb_widgets.clear()
+    _THUMB_CACHE_MAX = 200  # LRU 缓存上限
 
+    def _thumb_layout(self):
+        """计算缩略图网格布局参数。"""
         canvas_width = self.thumb_canvas.winfo_width()
         if canvas_width < self._s(100):
             canvas_width = self._s(600)
+        self._thumb_cols = max(1, canvas_width // self._thumb_item_w)
+        if self._thumb_cols:
+            self._thumb_item_w = canvas_width // self._thumb_cols
 
-        item_width = self._s(100)
-        cols = max(1, canvas_width // item_width)
+    def _thumb_index_at(self, canvas_x, canvas_y):
+        """返回 (canvas_x, canvas_y) 处的条目索引，无则返回 None。"""
+        col = int(canvas_x // self._thumb_item_w)
+        row = int(canvas_y // self._thumb_item_h)
+        idx = row * self._thumb_cols + col
+        if 0 <= idx < len(self.all_entries):
+            return idx
+        return None
 
-        for idx, entry in enumerate(self.all_entries):
+    def _thumb_entry_str(self, idx):
+        """返回第 idx 个条目的字符串路径。"""
+        return str(self.all_entries[idx])
+
+    def _thumb_render_viewport(self):
+        """渲染可见区域内的缩略图项目（每次全量重绘，避免孤儿 item）。"""
+        canvas = self.thumb_canvas
+        canvas.delete("all")
+        self._thumb_items.clear()
+        total = len(self.all_entries)
+        if total == 0:
+            return
+
+        iw = self._thumb_item_w
+        ih = self._thumb_item_h
+        cols = self._thumb_cols
+
+        # 计算可见范围（加上 extra 缓冲行）
+        cy = int(canvas.canvasy(0))
+        ch = canvas.winfo_height() or self._s(600)
+        extra = 2
+        first_visible = max(0, (cy // ih) - extra) * cols
+        last_visible = min(total, ((cy + ch) // ih + 1 + extra) * cols)
+
+        for idx in range(first_visible, last_visible):
+            entry = self.all_entries[idx]
             row = idx // cols
             col = idx % cols
-
-            frame = tk.Frame(self.thumb_inner, bg="white", padx=self._s(5), pady=self._s(5), cursor="hand2")
-            frame.grid(row=row, column=col, sticky="nsew", padx=self._s(5), pady=self._s(5))
-
+            x = col * iw + iw // 2
             entry_str = str(entry)
             is_selected = entry_str in self.selected_items
+            is_dir = entry.is_dir()
 
-            # 图标
+            # 背景矩形（选中高亮）
+            bg_color = "#cce8ff" if is_selected else "white"
+            bg_id = canvas.create_rectangle(
+                col * iw + 2, row * ih + 2,
+                (col + 1) * iw - 2, (row + 1) * ih - 2,
+                fill=bg_color, outline="", tags="thumb_bg"
+            )
+
+            # 缩略图或占位符
+            thumb_y = row * ih + ih * 0.38
             cached = self.thumbnail_cache.get(entry)
-            if cached is not None and HAS_PIL:
-                if not isinstance(cached, ImageTk.PhotoImage):
-                    cached = ImageTk.PhotoImage(cached)
-                    self.thumbnail_cache[entry] = cached
-                lbl = tk.Label(frame, image=cached, bg="white")
-                lbl.image = cached
+            if cached is not None and HAS_PIL and isinstance(cached, ImageTk.PhotoImage):
+                img_id = canvas.create_image(x, thumb_y, image=cached, tags="thumb_img")
+                photo_ref = cached
+                loaded = True
             else:
-                icon = "▶" if entry.is_dir() else "▦"
-                lbl = tk.Label(frame, text=icon, font=("微软雅黑", self._fs(24)), bg="white", fg="#666")
-                lbl.is_thumb_placeholder = True
+                img_id = None
+                photo_ref = None
+                loaded = False
+                placeholder = "▶" if is_dir else "▦"
+                canvas.create_text(x, thumb_y, text=placeholder,
+                                   font=("微软雅黑", self._fs(18)), fill="#aaa",
+                                   tags="thumb_placeholder")
 
-            lbl.pack()
+            # 文件名文字
+            canvas.create_text(
+                x, row * ih + ih - self._s(8),
+                text=entry.name,
+                font=("微软雅黑", self._fs(8)),
+                fill="black",
+                width=iw - self._s(8),
+                tags="thumb_text"
+            )
 
-            # 文件名
-            name_lbl = tk.Label(frame, text=entry.name, bg="white", wraplength=self._s(80),
-                               font=("微软雅黑", self._fs(9)))
-            name_lbl.pack()
+            self._thumb_items[idx] = {
+                'bg_id': bg_id,
+                'img_id': img_id,
+                'photo_ref': photo_ref,
+                'loaded': loaded,
+            }
 
-            # 选中高亮
-            if is_selected:
-                frame.config(bg="#cce8ff")
-                lbl.config(bg="#cce8ff")
-                name_lbl.config(bg="#cce8ff")
+        # 记录可见范围，启动/确保全局加载器运行
+        self._thumb_visible_range = (first_visible, last_visible)
+        self._ensure_thumb_loader()
 
-            # 绑定点击事件
-            frame.bind("<Button-1>", lambda e, es=entry_str, fr=frame: self._on_thumb_click(es, fr))
-            lbl.bind("<Button-1>", lambda e, es=entry_str, fr=frame: self._on_thumb_click(es, fr))
-            name_lbl.bind("<Button-1>", lambda e, es=entry_str, fr=frame: self._on_thumb_click(es, fr))
+    def _show_thumbnails(self):
+        """Canvas 虚拟化缩略图视图 —— 只渲染可见区域。"""
+        canvas = self.thumb_canvas
+        canvas.delete("all")
+        self._thumb_items.clear()
 
-            frame.bind("<Button-3>", lambda e, es=entry_str: self._on_thumb_right_click(es))
-            lbl.bind("<Button-3>", lambda e, es=entry_str: self._on_thumb_right_click(es))
-            name_lbl.bind("<Button-3>", lambda e, es=entry_str: self._on_thumb_right_click(es))
+        if not self.all_entries:
+            return
 
-            # 双击进入/确认
-            frame.bind("<Double-Button-1>", lambda e, es=entry_str: self._on_thumb_double(es))
-            lbl.bind("<Double-Button-1>", lambda e, es=entry_str: self._on_thumb_double(es))
-            name_lbl.bind("<Double-Button-1>", lambda e, es=entry_str: self._on_thumb_double(es))
+        self._thumb_layout()
 
-            self.thumb_widgets[entry_str] = frame
+        total = len(self.all_entries)
+        cols = self._thumb_cols
+        total_height = ((total + cols - 1) // cols) * self._thumb_item_h + self._s(20)
+        canvas.configure(scrollregion=(0, 0, self._thumb_item_w * cols, total_height))
 
-        # 异步加载缩略图
-        self._thumb_cancel_token += 1
-        threading.Thread(target=self._load_thumbs_async, daemon=True,
-                         args=(self._thumb_cancel_token,)).start()
+        # 移除旧的绑定，添加新的
+        canvas.unbind("<Button-1>")
+        canvas.unbind("<Double-Button-1>")
+        canvas.unbind("<Button-3>")
+        canvas.unbind("<Configure>")
+        canvas.bind("<Button-1>", self._on_thumb_canvas_click)
+        canvas.bind("<Double-Button-1>", self._on_thumb_canvas_double)
+        canvas.bind("<Button-3>", self._on_thumb_canvas_right)
+        canvas.bind("<Configure>", self._on_thumb_canvas_configure)
 
-    def _load_thumbs_async(self, token):
-        for entry in self.all_entries:
-            if token != self._thumb_cancel_token:
+        self._thumb_render_viewport()
+
+    def _ensure_thumb_loader(self):
+        """确保全局缩略图加载线程在运行（切换目录后 token 变化，旧线程自动消亡）。"""
+        if not hasattr(self, '_thumb_loader_thread') or self._thumb_loader_thread is None \
+                or not self._thumb_loader_thread.is_alive():
+            t = threading.Thread(target=self._thumb_loader_loop, daemon=True,
+                                 args=(self._thumb_loader_token,))
+            self._thumb_loader_thread = t
+            t.start()
+
+    def _load_one_thumb(self, idx):
+        """加载单个缩略图到缓存，返回是否已加载。在主线程 or 后台线程均可调用。"""
+        if idx >= len(self.all_entries):
+            return False
+        entry = self.all_entries[idx]
+        with self._thumb_lock:
+            cached = self.thumbnail_cache.get(entry)
+        if cached is not None and HAS_PIL and isinstance(cached, ImageTk.PhotoImage):
+            return True
+        thumb = get_thumbnail(str(entry), (self._s(64), self._s(64)))
+        with self._thumb_lock:
+            if len(self.thumbnail_cache) >= self._THUMB_CACHE_MAX:
+                try:
+                    self.thumbnail_cache.pop(next(iter(self.thumbnail_cache)))
+                except (StopIteration, KeyError):
+                    pass
+            self.thumbnail_cache[entry] = thumb
+        return False  # 刚加载完，还不是 PhotoImage
+
+    def _thumb_loader_loop(self, token):
+        """全局加载器：先刷可见区域，再逐个加载剩余文件。
+        滚动时自动响应 _thumb_visible_range 的变化。"""
+        total = len(self.all_entries)
+        if total == 0:
+            return
+        walk_pos = 0  # 顺序扫描位置
+        while True:
+            if token != self._thumb_loader_token:
                 return
-            entry_str = str(entry)
-            with self._thumb_lock:
-                cached = self.thumbnail_cache.get(entry)
-            if cached is None:
-                thumb = get_thumbnail(entry_str, (self._s(64), self._s(64)))
-                with self._thumb_lock:
-                    if token == self._thumb_cancel_token:
-                        self.thumbnail_cache[entry] = thumb
+            if total == 0:
+                break
+            vis_start, vis_end = self._thumb_visible_range
 
-            if entry_str in self.thumb_widgets:
-                self.after(0, lambda e=entry, es=entry_str, t=token: self._update_thumb_icon(e, es, t))
+            # Phase 1: 优先刷可见区域（如果有漏网之鱼）
+            did_visible = False
+            for idx in range(vis_start, min(vis_end, total)):
+                if token != self._thumb_loader_token:
+                    return
+                if self._load_one_thumb(idx):
+                    # 缓存中已有 PhotoImage，尝试刷新画布
+                    if idx in self._thumb_items and not self._thumb_items[idx]['loaded']:
+                        self.after(0, lambda e=idx, t=token: self._update_thumb_icon_from_cache(e, t))
+                else:
+                    did_visible = True  # 刚加载了一个，需要再刷一轮
+                    if idx in self._thumb_items and not self._thumb_items[idx]['loaded']:
+                        self.after(0, lambda e=idx, t=token: self._update_thumb_icon_from_cache(e, t))
+
+            if did_visible:
+                continue  # 可见区域还有待加载，下一轮继续
+
+            # Phase 2: 顺序加载剩余（每次批量前进）
+            batch = 0
+            while batch < 30 and walk_pos < total:
+                if token != self._thumb_loader_token:
+                    return
+                if vis_start <= walk_pos < vis_end:
+                    walk_pos += 1
+                    continue  # 跳过可见区域（已处理）
+                self._load_one_thumb(walk_pos)
+                batch += 1
+                walk_pos += 1
+
+            if walk_pos >= total:
+                break  # 全部加载完毕
+
+    def _update_thumb_icon_from_cache(self, idx, token):
+        """从缓存中取出 PhotoImage 更新到 Canvas（主线程）。"""
+        if token != self._thumb_loader_token:
+            return
+        if idx not in self._thumb_items:
+            return
+        entry = self.all_entries[idx]
+        with self._thumb_lock:
+            cached = self.thumbnail_cache.get(entry)
+        if cached is None or not HAS_PIL:
+            return
+        if not isinstance(cached, ImageTk.PhotoImage):
+            photo = self._pil_to_photo(cached)
+            with self._thumb_lock:
+                if token == self._thumb_loader_token:
+                    self.thumbnail_cache[entry] = photo if photo else cached
+        else:
+            photo = cached
+        if photo is None:
+            return
+        info = self._thumb_items[idx]
+        canvas = self.thumb_canvas
+        if info.get('img_id') is not None:
+            canvas.itemconfig(info['img_id'], image=photo)
+            info['photo_ref'] = photo
+            info['loaded'] = True
+            return
+        # 创建新 image item
+        iw = self._thumb_item_w
+        ih = self._thumb_item_h
+        cols = self._thumb_cols
+        row = idx // cols
+        col = idx % cols
+        x = col * iw + iw // 2
+        thumb_y = row * ih + ih * 0.38
+        img_id = canvas.create_image(x, thumb_y, image=photo, tags="thumb_img")
+        info['img_id'] = img_id
+        info['photo_ref'] = photo
+        info['loaded'] = True
+        # 删占位符
+        for cid in canvas.find_all():
+            if canvas.type(cid) == "text":
+                coords = canvas.coords(cid)
+                if abs(coords[0] - x) < 5 and abs(coords[1] - thumb_y) < 5:
+                    if canvas.itemcget(cid, "text") in ("▶", "▦"):
+                        canvas.delete(cid)
+                        break
 
     def _pil_to_photo(self, pil_img):
         """将 PIL Image 转为 PhotoImage（必须在主线程调用）。"""
@@ -522,12 +691,12 @@ class FileBrowserDialog(tk.Toplevel):
             return None
         return ImageTk.PhotoImage(pil_img)
 
-    def _update_thumb_icon(self, entry, entry_str, token):
+    def _update_thumb_icon(self, entry, idx, token):
+        """在 Canvas 上更新指定条目的缩略图（主线程调用）。"""
         if token != self._thumb_cancel_token:
             return
-        if entry_str not in self.thumb_widgets:
+        if idx not in self._thumb_items:
             return
-        frame = self.thumb_widgets[entry_str]
         with self._thumb_lock:
             pil_img = self.thumbnail_cache.get(entry)
         if pil_img is None:
@@ -539,46 +708,78 @@ class FileBrowserDialog(tk.Toplevel):
             with self._thumb_lock:
                 if token == self._thumb_cancel_token:
                     self.thumbnail_cache[entry] = photo
-        for widget in frame.winfo_children():
-            if isinstance(widget, tk.Label) and getattr(widget, "is_thumb_placeholder", False):
-                widget.destroy()
-                lbl = tk.Label(frame, image=photo, bg=frame.cget("bg"))
-                lbl.image = photo
-                existing = frame.winfo_children()
-                if existing:
-                    lbl.pack(before=existing[0])
-                else:
-                    lbl.pack()
-                lbl.bind("<Button-1>", lambda e, es=entry_str, fr=frame: self._on_thumb_click(es, fr))
-                lbl.bind("<Double-Button-1>", lambda e, es=entry_str: self._on_thumb_double(es))
-                lbl.bind("<Button-3>", lambda e, es=entry_str: self._on_thumb_right_click(es))
-                break
+        if photo is None:
+            return
+        info = self._thumb_items[idx]
+        canvas = self.thumb_canvas
+        cols = self._thumb_cols
+        iw = self._thumb_item_w
+        ih = self._thumb_item_h
+        row = idx // cols
+        col = idx % cols
+        x = col * iw + iw // 2
+        thumb_y = row * ih + ih * 0.38
+        if info.get('img_id') is not None:
+            # 已有 image item，替换图片
+            canvas.itemconfig(info['img_id'], image=photo)
+            info['photo_ref'] = photo
+            info['loaded'] = True
+            return
+        # 创建新的 image item
+        img_id = canvas.create_image(x, thumb_y, image=photo, tags="thumb_img")
+        info['img_id'] = img_id
+        info['photo_ref'] = photo
+        info['loaded'] = True
+        # 删除旧的占位符文字
+        for cid in canvas.find_all():
+            if canvas.type(cid) == "text":
+                coords = canvas.coords(cid)
+                if abs(coords[0] - x) < 5 and abs(coords[1] - thumb_y) < 5:
+                    if canvas.itemcget(cid, "text") in ("▶", "▦"):
+                        canvas.delete(cid)
+                        break
 
-    def _on_thumb_click(self, entry_str, frame):
-        if self.multi_select:
+    # ---- Canvas 事件处理 ----
+    def _thumb_idx_from_event(self, event):
+        """从 Canvas 鼠标事件中获取条目索引。"""
+        x = self.thumb_canvas.canvasx(event.x)
+        y = self.thumb_canvas.canvasy(event.y)
+        return self._thumb_index_at(x, y)
+
+    def _on_thumb_canvas_click(self, event):
+        idx = self._thumb_idx_from_event(event)
+        if idx is None:
+            return
+        entry_str = self._thumb_entry_str(idx)
+        if self.multi_select and self.multi_mode_var.get():
             if entry_str in self.selected_items:
                 self.selected_items.discard(entry_str)
             else:
                 self.selected_items.add(entry_str)
         else:
             self.selected_items = {entry_str}
-
-        if self.view_mode == "thumbnails":
-            self._refresh_thumb_highlights()
-        else:
-            self.file_list.selection_set(entry_str)
-
+        self._thumb_render_viewport()
         self._update_status()
 
-    def _on_thumb_double(self, entry_str):
+    def _on_thumb_canvas_double(self, event):
+        if self.multi_select and self.multi_mode_var.get():
+            return
+        idx = self._thumb_idx_from_event(event)
+        if idx is None:
+            return
+        entry_str = self._thumb_entry_str(idx)
         if os.path.isdir(entry_str):
             self._load_directory(entry_str)
         else:
             self._on_open()
 
-    def _on_thumb_right_click(self, entry_str):
+    def _on_thumb_canvas_right(self, event):
         if not (self.multi_select and self.multi_mode_var.get()):
             return "break"
+        idx = self._thumb_idx_from_event(event)
+        if idx is None:
+            return "break"
+        entry_str = self._thumb_entry_str(idx)
         if self._range_anchor is None:
             self._range_anchor = entry_str
             self._blink_on = True
@@ -592,8 +793,7 @@ class FileBrowserDialog(tk.Toplevel):
             try:
                 idx1 = next(i for i, e in enumerate(self.all_entries)
                             if str(e) == self._range_anchor)
-                idx2 = next(i for i, e in enumerate(self.all_entries)
-                            if str(e) == entry_str)
+                idx2 = idx
             except StopIteration:
                 self._range_anchor = None
                 self.status_label.config(
@@ -605,21 +805,22 @@ class FileBrowserDialog(tk.Toplevel):
                 eiid = str(self.all_entries[i])
                 self.selected_items.add(eiid)
             self._stop_blink_anchor()
-            self._refresh_thumb_highlights()
+            self._thumb_render_viewport()
             self._range_anchor = None
             self.status_label.config(
                 text="多选模式已启用，左键单个选择（可取消），右键范围选择（仅选定）。",
                 fg="black")
         return "break"
 
-    def _refresh_thumb_highlights(self):
-        for entry_str, frame in self.thumb_widgets.items():
-            is_selected = entry_str in self.selected_items
-            bg = "#cce8ff" if is_selected else "white"
-            frame.config(bg=bg)
-            for widget in frame.winfo_children():
-                if isinstance(widget, tk.Label):
-                    widget.config(bg=bg)
+    def _on_thumb_canvas_configure(self, event):
+        """画布大小变化时重新布局。"""
+        self._thumb_layout()
+        total = len(self.all_entries)
+        cols = self._thumb_cols
+        total_height = ((total + cols - 1) // cols) * self._thumb_item_h + self._s(20)
+        self.thumb_canvas.configure(scrollregion=(
+            0, 0, self._thumb_item_w * cols, total_height))
+        self._thumb_render_viewport()
 
     def _on_file_click(self, event):
         iid = self.file_list.identify_row(event.y)
@@ -699,7 +900,7 @@ class FileBrowserDialog(tk.Toplevel):
             self.selected_items.add(iid)
             self.file_list.selection_add(iid)
         if self.view_mode == "thumbnails":
-            self._refresh_thumb_highlights()
+            self._thumb_render_viewport()
         self.status_label.config(
             text=f"多选模式已启用，左键单个选择（可取消），右键范围选择（仅选定）。"
                  f"当前已选择{len(self.selected_items)}个文件",
@@ -717,22 +918,25 @@ class FileBrowserDialog(tk.Toplevel):
             self._blink_timer = None
             return
         if self.view_mode == "thumbnails":
-            frame = self.thumb_widgets.get(self._range_anchor)
-            if frame is None:
-                self._blink_on = False
-                self._blink_timer = None
-                return
+            canvas = self.thumb_canvas
             if self._blink_on:
-                frame.config(bg="white")
-                for w in frame.winfo_children():
-                    if isinstance(w, tk.Label):
-                        w.config(bg="white")
+                # 找到 anchor 对应的 idx 并更新 bg 为白色
+                for idx, info in self._thumb_items.items():
+                    if idx >= len(self.all_entries):
+                        continue
+                    if str(self.all_entries[idx]) == self._range_anchor:
+                        if info.get('bg_id'):
+                            canvas.itemconfig(info['bg_id'], fill="white")
+                        break
                 self._blink_on = False
             else:
-                frame.config(bg="#cce8ff")
-                for w in frame.winfo_children():
-                    if isinstance(w, tk.Label):
-                        w.config(bg="#cce8ff")
+                for idx, info in self._thumb_items.items():
+                    if idx >= len(self.all_entries):
+                        continue
+                    if str(self.all_entries[idx]) == self._range_anchor:
+                        if info.get('bg_id'):
+                            canvas.itemconfig(info['bg_id'], fill="#cce8ff")
+                        break
                 self._blink_on = True
         else:
             if self._blink_on:
@@ -750,7 +954,7 @@ class FileBrowserDialog(tk.Toplevel):
             self._blink_timer = None
         self._blink_on = False
         if self.view_mode == "thumbnails" and self._range_anchor:
-            self._refresh_thumb_highlights()
+            self._thumb_render_viewport()
 
     def _cancel_batch_timer(self):
         if self._batch_timer is not None:
@@ -845,6 +1049,12 @@ class FileBrowserDialog(tk.Toplevel):
 
     def _on_thumb_scroll(self, event):
         self.thumb_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._thumb_render_viewport()
+
+    def _on_thumb_scrollbar(self, *args):
+        """滚动条拖动/点击时同步刷新视口。"""
+        self.thumb_canvas.yview(*args)
+        self._thumb_render_viewport()
 
     def _format_size(self, size):
         for unit in ['B', 'KB', 'MB', 'GB']:
