@@ -363,7 +363,8 @@ class GeminiImageGenerator:
     TOML_VALID_VALUES = {
         "import_mode": ["clear_and_overwrite", "overwrite_existing"],
         "model_laozhang": ["gemini-2.5-flash-image", "gemini-3-pro-image-preview",
-                  "gemini-3.1-flash-image-preview", "gpt-image-2-vip"],
+                  "gemini-3.1-flash-image-preview", "gpt-image-2-vip",
+                  "flux-2-pro", "flux-2-flex", "flux-2-max"],
         "aspect_ratio": ["16:9", "5:4", "4:3", "3:2", "1:1", "21:9", "2:3", "3:4", "4:5", "9:16"],
         "resolution": ["1K", "2K", "4K"],
         "zoom": ["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"],
@@ -409,6 +410,24 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "gpt_image_vip",
             "max_ref_images": 10
+        },
+        "flux-2-pro": {
+            "resolutions": ["1K", "2K", "4K"],
+            "stable": False,
+            "backend": "flux",
+            "max_ref_images": 8
+        },
+        "flux-2-flex": {
+            "resolutions": ["1K", "2K", "4K"],
+            "stable": False,
+            "backend": "flux",
+            "max_ref_images": 8
+        },
+        "flux-2-max": {
+            "resolutions": ["1K", "2K", "4K"],
+            "stable": False,
+            "backend": "flux",
+            "max_ref_images": 8
         }
     }
 
@@ -518,6 +537,7 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
 # 老张API-NanoBanana调用器 配置文件
 # 将本文件拖入程序窗口，即可自动填写配置。一次只可以拖入一个配置文件。
 # 名字改成default.toml并放在程序同目录下，可以实现自动导入配置。
+# 必须使用“UTF-8（无BOM）的文本编码保存TOML文件，否则脚本无法读取。
 
 #####################【导入模式 - 必填】#####################
 
@@ -533,28 +553,39 @@ if __name__=="__main__":r=tk.Tk();V(r);r.mainloop()
 ### 没写的配置不会去动，写了但是留空的配置会被清空。
 ### 如果有无法解析的值（例如写错模型名字），脚本会弹窗报错，然后询问用户是否继续导入剩下的配置项。
 
+##### 下一行开始编写你的内容 #####
 import_mode = "overwrite_existing"
+
+
 
 #########################【API配置】#########################
 [api]
 # 【API密钥】
 # 调用API接口的密钥。支持多平台密钥共存，方便不同平台版本的脚本共用同一份toml。
-# 旧版的“key”变量已被弃用，但脚本仍然做了兼容，建议更改为新版。
+# 考虑到可能需要一份TOML文件同时支持不同站点的生成器，
+# 所以旧版的“key”变量已被弃用，但脚本仍然做了兼容，建议更改为新版。
 # 示例：
 # key_laozhang = "sk-123456789abcdefghijklmno1234567890abcdef12345678"
 # key_1234 = "sk-abcdefg123456789hijk123451234lmno567867890abcdef"
 # key_abcde = "sk-12345abcdefghijk67891234lmno567812345abcdef67890"
 
+##### 下一行开始编写你的内容 #####
 key_laozhang = ""
+
+
 
 # ------------------------------------------------------------
 
 # 【模型选择】
-# 可选值:
+# 老张API平台的可选值:
 # "gemini-2.5-flash-image", "gemini-3-pro-image-preview",
-# "gemini-3.1-flash-image-preview", "gpt-image-2-vip"
+# "gemini-3.1-flash-image-preview", "gpt-image-2-vip",
+# "flux-2-pro", "flux-2-flex", "flux-2-max"
 
+##### 下一行开始编写你的内容 #####
 model_laozhang = "gemini-3.1-flash-image-preview"
+
+
 
 #########################【生成参数】#########################
 
@@ -565,22 +596,31 @@ model_laozhang = "gemini-3.1-flash-image-preview"
 # 特殊——"1:1", "21:9",
 # 横版——"2:3", "3:4", "4:5", "9:16"
 
-aspect_ratio = "1:1"
+##### 下一行开始编写你的内容 #####
+aspect_ratio = "4:3"
+
+
 
 # ------------------------------------------------------------
 
 # 【分辨率】
 # 可选值: "1K", "2K", "4K"
-# 注意: gemini-2.5-flash-image 仅支持 "1K"
+# 注意: Gemini 2.5 仅支持 "1K"，Flux系列最高支持2K。
 
+##### 下一行开始编写你的内容 #####
 resolution = "4K"
+
+
 
 # ------------------------------------------------------------
 
 # 【网络超时时间】
 # 单位：秒，0表示无限制，默认1200秒
 
-network_timeout = 1200
+##### 下一行开始编写你的内容 #####
+network_timeout = 3600
+
+
 
 # ------------------------------------------------------------
 
@@ -588,14 +628,20 @@ network_timeout = 1200
 # 生成前是否弹出参数确认弹窗，防止未检查导致误生成
 # true = 开启，false = 关闭
 
-confirm_before_generate = false
+##### 下一行开始编写你的内容 #####
+confirm_before_generate = true
+
+
 
 # ------------------------------------------------------------
 
 # 【自动保存生成日志】
 # true = 开启，false = 关闭
 
+##### 下一行开始编写你的内容 #####
 log_to_file = false
+
+
 
 # ------------------------------------------------------------
 
@@ -612,11 +658,11 @@ log_to_file = false
 # 2. 正在玩CSGO。
 # 3. 电脑桌面上有一盆猫粮。'''
 
+##### 下一行开始编写你的内容 #####
 prompt = '''
-生成一只猫，要求：
-1. 橘色上肢，紫色下肢；
-2. 正在玩CSGO。
-3. 电脑桌面上有一盆猫粮。
+
+
+
 '''
 
 ######################## 【界面设置】 ########################
@@ -624,10 +670,18 @@ prompt = '''
 [ui]
 # 界面缩放比例
 # 可选值: "75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"。
-zoom = "125%"
+
+##### 下一行开始编写你的内容 #####
+zoom = "175%"
+
+
 
 # 提示词输入框行数（2~98）
-prompt_lines = 4
+
+##### 下一行开始编写你的内容 #####
+prompt_lines = 8
+
+
 
 ######################## 【参考图片】 ########################
 # 程序启动时自动加载的参考图片路径列表。如果留空（如 path = ""），将自动跳过，建议不用时加上"#"注释掉，或者后续再添加。
@@ -655,6 +709,7 @@ prompt_lines = 4
 # [[reference_images]]
 # path = ".\\素材图片\\人物照片.webp"
 
+##### 下一行开始编写你的内容 #####
 [[reference_images]]
 path = ""
 
@@ -1324,7 +1379,7 @@ path = ""
         model_id = self.model_var.get()
         config = self.MODEL_CONFIGS.get(model_id, {})
         backend = config.get("backend", "nanobanana")
-        if backend == "gpt_image_vip":
+        if backend == "gpt_image_vip" or backend == "flux":
             return "https://api.laozhang.ai/v1"
         return f"https://api.laozhang.ai/v1beta/models/{model_id}:generateContent"
 
@@ -1611,10 +1666,6 @@ path = ""
             if model_lz is not None:
                 if not isinstance(model_lz, str) or model_lz not in self.TOML_VALID_VALUES["model_laozhang"]:
                     errors.append(f"api.model_laozhang 值不合法: {model_lz}")
-            # api.model (旧版，兼容)
-            api_model = api.get("model", None)
-            if api_model is not None and not isinstance(api_model, str):
-                errors.append("api.model 必须是字符串")
         else:
             if api is not None:
                 errors.append("[api] 段格式错误")
@@ -1736,34 +1787,13 @@ path = ""
                         self.api_key.set("")
                 else:
                     self.api_key.set("")
-            if "model_laozhang" in api:
-                model_val = str(api["model_laozhang"]) if api["model_laozhang"] is not None else ""
-                if model_val:
-                    valid_models = self.TOML_VALID_VALUES.get("model_laozhang", [])
-                    if model_val in valid_models:
-                        self.model_var.set(model_val)
-                    else:
-                        self.update_status(f"配置中的 model_laozhang 值不合法 ({model_val})，已跳过")
-                if "model" in api and api.get("model"):
-                    msg = "检测到同时包含新版格式“model_laozhang”和旧版格式“model”，已自动使用新版"
-                    print(f"[提示] {msg}")
-                    self.update_status(msg)
-            elif "model" in api:
-                old_model_value = str(api["model"]) if api["model"] is not None else ""
-                if old_model_value:
-                    choice = self._show_old_key_dialog(old_model_value, "model_laozhang", "model", mask=False)
-                    if choice == "force":
-                        valid_models = self.TOML_VALID_VALUES.get("model_laozhang", [])
-                        if old_model_value in valid_models:
-                            self.model_var.set(old_model_value)
-                        else:
-                            msg = f"旧版 model 值 ({old_model_value}) 不是有效模型，已跳过"
-                            print(f"[提示] {msg}")
-                            self.update_status(msg)
-                    elif choice == "manual":
-                        self.model_var.set(self.TOML_DEFAULTS["model_laozhang"])
+            if "model_laozhang" in api and api["model_laozhang"]:
+                model_val = str(api["model_laozhang"])
+                valid_models = self.TOML_VALID_VALUES.get("model_laozhang", [])
+                if model_val in valid_models:
+                    self.model_var.set(model_val)
                 else:
-                    self.model_var.set(self.TOML_DEFAULTS["model_laozhang"])
+                    self.update_status(f"配置中的 model_laozhang 值不合法 ({model_val})，已跳过")
 
         # ---- [generation] ----
         gen = config_dict.get("generation", {})
@@ -2061,6 +2091,12 @@ path = ""
                 args=(self.api_key.get(), prompt),
                 daemon=True
             )
+        elif backend == "flux":
+            self.generate_thread = threading.Thread(
+                target=self._generate_thread_flux,
+                args=(self.api_key.get(), prompt),
+                daemon=True
+            )
         else:
             self.generate_thread = threading.Thread(
                 target=self._generate_thread,
@@ -2203,6 +2239,88 @@ path = ""
                     f.close()
                 except Exception:
                     pass
+
+    # 后台线程生成图片 (Flux 2)
+    def _generate_thread_flux(self, api_key, prompt):
+        """后台线程执行 Flux 2 API调用
+        
+        Flux 2 特点：
+        - 统一使用 /v1/images/generations 端点（文生图和图改图都是这个）
+        - 图改图时通过 input_image, input_image_2...input_image_8 传递 base64 图片
+        - 图片格式为 data:image/png;base64,xxx 或 data:image/jpeg;base64,xxx
+        - 尺寸使用 width/height 参数（整数，建议16的倍数）
+        - 最多支持 8 张参考图
+        """
+        timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
+        timeout = None if timeout_val == 0 else timeout_val
+        
+        # 计算 width/height 参数（根据纵横比和分辨率）
+        aspect = self.aspect_ratio.get()
+        resolution = self.resolution.get()
+        
+        # Flux 2 尺寸映射（基于官方文档）
+        # 官方支持尺寸：1024x1024、1792x1024、1024x1792
+        # 使用 size 参数（字符串格式）
+        # 1K ≈ 1MP（约100万像素），2K = 1792px 长边（硬件上限）
+        FLUX_SIZE_MAP = {
+            "1:1":   {"1K": "1024x1024", "2K": "1792x1792"},
+            "2:3":   {"1K": "832x1248",  "2K": "1024x1792"},
+            "3:2":   {"1K": "1248x832",  "2K": "1792x1024"},
+            "3:4":   {"1K": "864x1152",  "2K": "1024x1792"},
+            "4:3":   {"1K": "1152x864",  "2K": "1792x1024"},
+            "4:5":   {"1K": "896x1120",  "2K": "1024x1792"},
+            "5:4":   {"1K": "1120x896",  "2K": "1792x1024"},
+            "9:16":  {"1K": "756x1344",  "2K": "1024x1792"},
+            "16:9":  {"1K": "1344x756",  "2K": "1792x1024"},
+            "21:9":  {"1K": "656x1536",  "2K": "1792x768"}
+        }
+        
+        size = FLUX_SIZE_MAP.get(aspect, {}).get(resolution, "1024x1024")
+        
+        base_url = self.get_api_url()
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        model_id = self.model_var.get()  # flux-2-pro / flux-2-flex / flux-2-max
+        
+        try:
+            # 构建请求体 - 使用 size 参数（官方推荐格式）
+            payload = {
+                "model": model_id,
+                "prompt": prompt,
+                "size": size,
+                "safety_tolerance": 6,      # 最宽松的内容审核（0-6，6=最宽松）
+                "output_format": "png",     # 返回PNG格式（高质量）
+                "prompt_upsampling": False  # 关闭自动提示词优化
+            }
+            
+            # 图改图：添加 input_image 参数（支持多图，最多8张）
+            if self.reference_images:
+                for idx, (filepath, image_b64, mime_type, _) in enumerate(self.reference_images[:8], start=1):
+                    # 格式：data:image/png;base64,xxx 或 data:image/jpeg;base64,xxx
+                    data_uri = f"data:{mime_type};base64,{image_b64}"
+                    if idx == 1:
+                        payload["input_image"] = data_uri
+                    else:
+                        payload[f"input_image_{idx}"] = data_uri
+            
+            full_url = f"{base_url}/images/generations"
+            
+            response = requests.post(
+                full_url,
+                headers=headers,
+                json=payload,
+                timeout=timeout
+            )
+            
+            # Flux 和 GPT VIP 响应格式相同，复用处理方法
+            self.root.after(0, self._handle_response_gpt_vip, response, full_url, "flux_generations")
+            
+        except Exception as e:
+            self.root.after(0, self._handle_error, str(e), base_url)
+
     # 处理API响应 (NanoBanana)
     def _handle_response(self, response, url=None, actual_image_size=None):
         """处理NanoBanana API响应"""
@@ -2474,20 +2592,20 @@ path = ""
         """显示代理警告弹窗，返回用户是否选择继续"""
         dialog = tk.Toplevel(self.root)
         dialog.title("网络环境检测")
-        dialog.geometry("400x150")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(True, True)
-        # 绑定Esc关闭弹窗
         dialog.bind("<Escape>", lambda e: dialog.destroy())
         
         result = False
         suppress_var = tk.BooleanVar(value=False)
         
-        # 提示文本
+        # 提示文本（不设固定 wraplength，让窗口宽度 1/3 主屏宽时再换行）
+        screen_w = dialog.winfo_screenwidth()
+        wrap_width = int(screen_w * 0.3)
         message = "检测到您已开启系统代理，请确保网络环境稳定，否则图片会传输失败，无法续传。是否继续生成？"
-        label = tk.Label(dialog, text=message, wraplength=350, justify=tk.LEFT, padx=10, pady=10)
-        label.pack(fill=tk.X)
+        label = tk.Label(dialog, text=message, wraplength=wrap_width, justify=tk.LEFT, padx=10, pady=10)
+        label.pack(fill=tk.BOTH, expand=True)
         
         # 复选框
         check_btn = tk.Checkbutton(dialog, text="本次不再提示", variable=suppress_var)
@@ -2495,7 +2613,7 @@ path = ""
         
         # 按钮区域
         btn_frame = tk.Frame(dialog)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(fill=tk.X, pady=10)
         
         def on_continue():
             nonlocal result, suppress_var
@@ -2509,12 +2627,12 @@ path = ""
             dialog.destroy()
         
         continue_btn = ttk.Button(btn_frame, text="继续生成", command=on_continue, width=12)
-        continue_btn.pack(side=tk.LEFT, padx=10)
+        continue_btn.pack(side=tk.LEFT, expand=True, padx=10)
         
         cancel_btn = ttk.Button(btn_frame, text="取消", command=on_cancel, width=12)
-        cancel_btn.pack(side=tk.LEFT, padx=10)
+        cancel_btn.pack(side=tk.LEFT, expand=True, padx=10)
         
-        # 居中显示
+        # 计算自然尺寸后居中（不设固定 geometry）
         dialog.update_idletasks()
         x = self.root.winfo_rootx() + self.root.winfo_width() // 2 - dialog.winfo_width() // 2
         y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - dialog.winfo_height() // 2
@@ -2523,32 +2641,24 @@ path = ""
         self.root.wait_window(dialog)
         return result
 
-    # 旧版配置项检测弹窗（兼容 key 和 model 等）
-    def _show_old_key_dialog(self, old_key_value, new_var_name, old_var_name, mask=True):
-        """显示旧版配置项检测弹窗，返回用户选择
-        
-        参数:
-            mask: True 时对值进行脱敏显示（用于密钥），False 时显示完整值（用于模型等）
-        """
+    # 旧版密钥检测弹窗
+    def _show_old_key_dialog(self, old_key_value, new_var_name, old_var_name):
+        """显示旧版密钥检测弹窗，返回用户选择"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("旧版配置检测")
+        dialog.title("旧版密钥检测")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
         dialog.bind("<Escape>", lambda e: dialog.destroy())
 
-        if mask:
-            suffix = old_key_value[-6:] if len(old_key_value) >= 6 else old_key_value
-            display_value = f"****{suffix}"
-        else:
-            display_value = old_key_value
+        suffix = old_key_value[-6:] if len(old_key_value) >= 6 else old_key_value
 
         message = (
             f"该脚本已启用最新版本的【{new_var_name}】变量，\n"
             f"旧版变量【{old_var_name}】已弃用，\n"
-            f"推荐您尽快更改配置以兼容新版。\n\n"
-            f"是否强制导入旧版变量存储的值？\n"
-            f"当前存储的值是：\n  {display_value}"
+            f"推荐您尽快更改变量名以兼容新版key。\n\n"
+            f"是否强制导入旧版变量存储的key？\n"
+            f"当前存储的key是：\n  ****{suffix}"
         )
 
         result = {"choice": "skip"}
@@ -2575,7 +2685,7 @@ path = ""
         force_btn.pack(fill=tk.X, pady=2)
         skip_btn = ttk.Button(btn_frame, text="不导入", command=on_skip)
         skip_btn.pack(fill=tk.X, pady=2)
-        manual_btn = ttk.Button(btn_frame, text="手动填写", command=on_manual)
+        manual_btn = ttk.Button(btn_frame, text="我自己写密钥", command=on_manual)
         manual_btn.pack(fill=tk.X, pady=2)
 
         dialog.protocol("WM_DELETE_WINDOW", on_skip)
@@ -2680,6 +2790,9 @@ path = ""
         if saved_backend == "gpt_image_vip":
             model_short = "vip"
             prefix = "gpt_images2"
+        elif saved_backend == "flux":
+            model_short = saved_model.split("-")[-1] if "-" in saved_model else saved_model
+            prefix = "flux2"
         else:
             model_short = saved_model.split("-")[1] if "-" in saved_model else saved_model
             prefix = "gemini"
@@ -2884,6 +2997,8 @@ path = ""
             # 根据后端类型和模型名构建文件名前缀
             if backend == "gpt_image_vip":
                 file_prefix = "GPT-image-2"
+            elif backend == "flux":
+                file_prefix = "Flux-2"
             else:
                 parts = model.split("-")
                 if len(parts) >= 2:
@@ -2978,6 +3093,9 @@ path = ""
         if config.get("stable"):  # gemini-2.5-flash-image
             self.resolution_combo.config(values=["1K"], state="readonly")
             self.resolution.set("1K")
+        elif backend == "flux":
+            self.resolution_combo.config(values=["1K", "2K"], state="readonly")
+            self.resolution.set("2K")
         else:
             self.resolution_combo.config(values=["1K", "2K", "4K"], state="readonly")
             self.resolution.set("4K")  # 默认4K
@@ -3324,6 +3442,7 @@ path = ""
         dialog.grab_set()
         dialog.resizable(False, False)
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
 
         tk.Label(dialog, text="检测到多次退出失败，现在可以按下“确定”按钮退出。",
                 font=("TkDefaultFont", 11), wraplength=380).pack(pady=(20, 15), padx=20)
