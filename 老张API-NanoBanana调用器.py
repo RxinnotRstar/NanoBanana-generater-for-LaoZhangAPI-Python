@@ -362,9 +362,8 @@ class GeminiImageGenerator:
     # 各字段合法枚举值
     TOML_VALID_VALUES = {
         "import_mode": ["clear_and_overwrite", "overwrite_existing"],
-        "model_laozhang": ["gemini-2.5-flash-image", "gemini-3-pro-image-preview",
-                  "gemini-3.1-flash-image-preview", "gpt-image-2-vip",
-                  "flux-2-pro", "flux-2-flex", "flux-2-max"],
+        "model_laozhang": [],  # 启动时由 _init_toml_valid_values() 从 MODEL_CONFIGS 动态填充
+        "api_endpoint": [],      # 启动时由 _init_toml_valid_values() 从 API_ENDPOINTS 动态填充
         "aspect_ratio": ["16:9", "5:4", "4:3", "3:2", "1:1", "21:9", "2:3", "3:4", "4:5", "9:16"],
         "resolution": ["1K", "2K", "4K"],
         "zoom": ["75%", "100%", "125%", "150%", "175%", "200%", "250%", "300%", "500%"],
@@ -375,6 +374,7 @@ class GeminiImageGenerator:
     TOML_DEFAULTS = {
         "api_key": "",
         "model_laozhang": "gemini-3.1-flash-image-preview",
+        "api_endpoint": "api.laozhang.ai",
         "aspect_ratio": "1:1",
         "resolution": "4K",
         "network_timeout": "1200",
@@ -385,49 +385,98 @@ class GeminiImageGenerator:
         "prompt_lines": 5,
     }
 
-    # 模型配置
+    # ==================== 模型配置（配置驱动核心）====================
+    # 所有后端特有的知识都放在这里，前端只读不写。
+    # 新增模型只需在此加一条记录，无需改任何其他代码。
     MODEL_CONFIGS = {
         "gemini-2.5-flash-image": {
             "resolutions": ["1K"],
             "stable": True,
             "backend": "nanobanana",
-            "max_ref_images": 14
+            "max_ref_images": 14,
+            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "supports_image_size": False,
+            "file_prefix": "gemini",
+            "model_tag": "2.5",
+            "log_prefix": "Gemini-2.5"
         },
         "gemini-3-pro-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
             "backend": "nanobanana",
-            "max_ref_images": 14
+            "max_ref_images": 14,
+            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "supports_image_size": True,
+            "file_prefix": "gemini",
+            "model_tag": "3",
+            "log_prefix": "Gemini-3.0"
         },
         "gemini-3.1-flash-image-preview": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
             "backend": "nanobanana",
-            "max_ref_images": 14
+            "max_ref_images": 14,
+            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "supports_image_size": True,
+            "file_prefix": "gemini",
+            "model_tag": "3.1",
+            "log_prefix": "Gemini-3.1"
         },
         "gpt-image-2-vip": {
             "resolutions": ["1K", "2K", "4K"],
             "stable": False,
             "backend": "gpt_image_vip",
-            "max_ref_images": 10
+            "max_ref_images": 10,
+            "base_url": "https://api.laozhang.ai/v1",
+            "supports_image_size": False,
+            "file_prefix": "gpt_images2",
+            "model_tag": "vip",
+            "log_prefix": "GPT-image-2"
         },
         "flux-2-pro": {
-            "resolutions": ["1K", "2K", "4K"],
+            "resolutions": ["1K", "2K"],
             "stable": False,
             "backend": "flux",
-            "max_ref_images": 8
+            "max_ref_images": 8,
+            "base_url": "https://api.laozhang.ai/v1",
+            "supports_image_size": False,
+            "file_prefix": "flux2",
+            "model_tag": "pro",
+            "log_prefix": "Flux-2"
         },
         "flux-2-flex": {
-            "resolutions": ["1K", "2K", "4K"],
+            "resolutions": ["1K", "2K"],
             "stable": False,
             "backend": "flux",
-            "max_ref_images": 8
+            "max_ref_images": 8,
+            "base_url": "https://api.laozhang.ai/v1",
+            "supports_image_size": False,
+            "file_prefix": "flux2",
+            "model_tag": "flex",
+            "log_prefix": "Flux-2"
         },
         "flux-2-max": {
-            "resolutions": ["1K", "2K", "4K"],
+            "resolutions": ["1K", "2K"],
             "stable": False,
             "backend": "flux",
-            "max_ref_images": 8
+            "max_ref_images": 8,
+            "base_url": "https://api.laozhang.ai/v1",
+            "supports_image_size": False,
+            "file_prefix": "flux2",
+            "model_tag": "max",
+            "log_prefix": "Flux-2"
+        }
+    }
+
+    # ==================== API 端点配置 ====================
+    # 各 API 端点对应不同后端的 base_url。
+    # 新增端点只需在此添加一条记录，前端自动出现下拉选项。
+    # 端点值为空字符串时，回退到 MODEL_CONFIGS 中对应模型的 base_url。
+    API_ENDPOINTS = {
+        "api.laozhang.ai": {
+            "nanobanana": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "gpt_image_vip": "https://api.laozhang.ai/v1",
+            "flux": "https://api.laozhang.ai/v1"
         }
     }
 
@@ -444,7 +493,41 @@ class GeminiImageGenerator:
         "16:9":  {"1K": "1280x720",   "2K": "2048x1152",  "4K": "3840x2160"},
         "21:9":  {"1K": "1280x544",   "2K": "2048x864",   "4K": "3840x1632"}
     }
-    
+
+    # ==================== 新增：后端插件注册表 ====================
+    # 配置驱动，新加后端只需在此注册一行 + 实现对应方法
+    BACKENDS_REGISTRY = {
+        "nanobanana": {
+            "class": None,  # 延迟加载（预留）
+            "generate_method": "_generate_nanobanana",
+            "handle_method": "_handle_response_nanobanana"
+        },
+        "gpt_image_vip": {
+            "class": None,
+            "generate_method": "_generate_gpt_vip",
+            "handle_method": "_handle_response_gpt_vip"
+        },
+        "flux": {
+            "class": None,
+            "generate_method": "_generate_flux",
+            "handle_method": "_handle_response_flux"
+        }
+    }
+
+    def _get_backend_generator(self, backend_type):
+        """获取指定后端的生成方法（返回方法引用）"""
+        if backend_type not in self.BACKENDS_REGISTRY:
+            return None
+        method_name = self.BACKENDS_REGISTRY[backend_type]["generate_method"]
+        return getattr(self, method_name, None)
+
+    def _get_backend_handler(self, backend_type):
+        """获取指定后端的响应处理方法"""
+        if backend_type not in self.BACKENDS_REGISTRY:
+            return None
+        method_name = self.BACKENDS_REGISTRY[backend_type]["handle_method"]
+        return getattr(self, method_name, None)
+
     # 嵌入的图片提取脚本代码
     EXPORT_SCRIPT_CODE = '''import tkinter as tk,tkinter.filedialog as fd,tkinter.messagebox as mb,json,base64
 from PIL import Image,ImageTk
@@ -571,6 +654,16 @@ import_mode = "overwrite_existing"
 
 ##### 下一行开始编写你的内容 #####
 key_laozhang = ""
+
+
+
+# ------------------------------------------------------------
+
+# 【API端点】
+# API端点决定了请求发往哪个服务器，下拉框直接显示域名。可选值会随脚本版本更新。
+
+##### 下一行开始编写你的内容 #####
+api_endpoint = "api.laozhang.ai"
 
 
 
@@ -720,7 +813,7 @@ path = ""
 
 
 
-    # ==================== 初始化与UI构建 ====================
+    # ==================== 初始化与 UI 构建 ====================
     def __init__(self, root):
         self.root = root
         
@@ -741,6 +834,8 @@ path = ""
         self.api_key = tk.StringVar(value="")
         # 默认模型选择
         self.model_var = tk.StringVar(value="gemini-3.1-flash-image-preview")
+        # API 端点选择
+        self.api_endpoint_var = tk.StringVar(value="api.laozhang.ai")
         # 当前模式下的最大参考图片数（由模型决定）
         self.current_max_ref_images = 14
         # 默认生成参数
@@ -811,6 +906,9 @@ path = ""
         # 文件选择器上次浏览路径
         self.last_chooser_path = None
 
+        # 动态填充 TOML 模型列表（必须在 setup_ui 之前）
+        self._init_toml_valid_values()
+
                 # 构建UI
         self.setup_ui()
         self.setup_window_behavior()
@@ -838,6 +936,11 @@ path = ""
             self.status_text.see(tk.END)
         
             self.status_text.config(state=tk.DISABLED)
+    def _init_toml_valid_values(self):
+        """启动时动态填充 TOML_VALID_VALUES 中的模型列表和端点列表"""
+        self.TOML_VALID_VALUES["model_laozhang"] = list(self.MODEL_CONFIGS.keys())
+        self.TOML_VALID_VALUES["api_endpoint"] = list(self.API_ENDPOINTS.keys())
+
     def _init_taskbar_progress(self):
         """初始化 Windows 任务栏进度条（ITaskbarList3）"""
         if platform.system() != "Windows" or not COMTYPES_AVAILABLE:
@@ -1056,13 +1159,20 @@ path = ""
                                activebackground="#d0d0d0", cursor="hand2",
                                padx=6, pady=0, font=("TkDefaultFont", 9))
         toggle_btn.pack(side=tk.RIGHT, fill=tk.Y)
-        # 模型选择
-        ttk.Label(api_frame, text="模型:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        # API 端点选择
+        endpoint_values = list(self.API_ENDPOINTS.keys())
+        ttk.Label(api_frame, text="API端点:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        endpoint_combo = ttk.Combobox(api_frame, textvariable=self.api_endpoint_var,
+                                      values=endpoint_values,
+                                      state="readonly", width=combo_width)
+        endpoint_combo.grid(row=1, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        # 模型选择（下移一行）
+        ttk.Label(api_frame, text="模型:").grid(row=2, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo = ttk.Combobox(api_frame, textvariable=self.model_var, 
                                    values=model_values,
                                    state="readonly", width=combo_width)
         # 绑定模型选择事件
-        model_combo.grid(row=1, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        model_combo.grid(row=2, column=1, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         model_combo.bind("<<ComboboxSelected>>", self.on_model_change)
         self.model_combo = model_combo
 
@@ -1335,8 +1445,42 @@ path = ""
         except tk.TclError:
             pass
 
-    # ==================== 核心功能实现 ====================
-    # 检测系统代理状态
+    # ==================== 核心工具方法 ====================
+    def get_api_url(self):
+        """获取当前模型的 API 端点
+        优先使用 API_ENDPOINTS 中选中端点的 base_url，
+        若该端点的对应后端值为空，则回退到 MODEL_CONFIGS 的 base_url。
+        """
+        model_id = self.model_var.get()
+        config = self.MODEL_CONFIGS.get(model_id, {})
+        backend = config.get("backend", "nanobanana")
+        endpoint_name = self.api_endpoint_var.get()
+        # 从选中的端点获取 base_url
+        endpoint = self.API_ENDPOINTS.get(endpoint_name, {})
+        endpoint_url = endpoint.get(backend, "") if endpoint else ""
+        template = endpoint_url or config.get("base_url", "")
+        if "{model_id}" in template:
+            return template.format(model_id=model_id)
+        return template
+
+    # 获取当前后端类型
+    def get_backend_type(self):
+        """获取当前模型的后端类型"""
+        model_id = self.model_var.get()
+        config = self.MODEL_CONFIGS.get(model_id, {})
+        return config.get("backend", "nanobanana")
+    # 根据文件扩展名获取 MIME 类型
+    def get_mime_type(self, filepath):
+        """根据文件扩展名获取 MIME 类型"""
+        ext = os.path.splitext(filepath)[1].lower()
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp'
+        }
+        return mime_types.get(ext, 'image/jpeg')
+        # 添加参考图片
     def _check_system_proxy(self):
         """检测Windows系统代理状态（其他系统默认返回False）"""
         system = platform.system()
@@ -1374,33 +1518,7 @@ path = ""
         return False
     
     # 获取当前模型的 API 端点
-    def get_api_url(self):
-        """获取当前模型的 API 端点"""
-        model_id = self.model_var.get()
-        config = self.MODEL_CONFIGS.get(model_id, {})
-        backend = config.get("backend", "nanobanana")
-        if backend == "gpt_image_vip" or backend == "flux":
-            return "https://api.laozhang.ai/v1"
-        return f"https://api.laozhang.ai/v1beta/models/{model_id}:generateContent"
-
-    # 获取当前后端类型
-    def get_backend_type(self):
-        """获取当前模型的后端类型"""
-        model_id = self.model_var.get()
-        config = self.MODEL_CONFIGS.get(model_id, {})
-        return config.get("backend", "nanobanana")
-    # 根据文件扩展名获取 MIME 类型
-    def get_mime_type(self, filepath):
-        """根据文件扩展名获取 MIME 类型"""
-        ext = os.path.splitext(filepath)[1].lower()
-        mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.webp': 'image/webp'
-        }
-        return mime_types.get(ext, 'image/jpeg')
-        # 添加参考图片
+    # ==================== 参考图片管理 ====================
     def add_images(self, filepaths_without_dialog=None):
         """添加多张参考图片
         
@@ -1605,7 +1723,80 @@ path = ""
         else:
             self.update_status("拖放内容中未找到有效的图片文件")
 
-    # ==================== TOML 配置文件解析与校验 ====================
+    def update_ref_count_label(self):
+        """更新参考图片计数标签"""
+        self.ref_count_label.config(
+            text=f"已选择: {len(self.reference_images)}/{self.current_max_ref_images}张"
+        )
+
+    def update_reference_preview(self):
+        """更新参考图片预览"""
+        self.ref_canvas.delete("all")
+        x_offset = 5
+        
+        # 获取当前缩放比例
+        zoom_str = self.zoom_var.get().rstrip('%')
+        try:
+            scale = int(zoom_str) / 100.0
+        except:
+            scale = 1.0
+        
+        # 固定缩略图尺寸为120x120，确保高缩放倍率下清晰可见
+        thumb_size = 120
+        # 根据缩放比例调整显示尺寸
+        for idx, (filepath, _, _, original_img) in enumerate(self.reference_images):
+            # 从缓存的原始图像重新生成缩略图
+            thumb_img = original_img.copy()
+            thumb_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+            
+            # 将 PIL 图像转换为 Tkinter 可用格式
+            tk_img = ImageTk.PhotoImage(thumb_img)
+            
+            # 在 canvas 上创建图像
+            img_id = self.ref_canvas.create_image(
+                x_offset, 5, anchor=tk.NW, image=tk_img
+            )
+            
+            # 保存引用防止被垃圾回收
+            if idx == 0:
+                self.ref_canvas.image_dict = {}
+            self.ref_canvas.image_dict[img_id] = tk_img
+            
+            # 删除按钮位置动态计算
+            btn_x = x_offset + thumb_size - 18
+            del_btn = tk.Button(
+                self.ref_canvas, text="×", fg="red", bg="white",
+                command=lambda i=idx: self.remove_reference(i),
+                font=("TkDefaultFont", 8), width=2, height=1,
+                bd=1, relief=tk.RAISED, activebackground="#ffd4d4"
+            )
+            self.ref_canvas.create_window(btn_x, 5, anchor=tk.NW, window=del_btn)
+            
+            x_offset += thumb_size + 10  # 每张图占用的宽度
+        
+        # 更新滚动区域
+        self.ref_canvas.config(scrollregion=(0, 0, x_offset, thumb_size + 10))
+        self.update_ref_count_label()
+    # 删除参考图片
+    def remove_reference(self, index):
+        """删除指定参考图片"""
+        if 0 <= index < len(self.reference_images):
+            del self.reference_images[index]
+            self.update_reference_preview()
+            self.update_status(f"已删除第 {index+1} 张参考图片")
+    # 清空参考图片
+    def clear_images(self):
+        """清空所有参考图片"""
+        if not self.reference_images:
+            return
+        # 确认清空
+        if messagebox.askyesno("确认", f"确定要清空 {len(self.reference_images)} 张参考图片吗？"):
+            self.reference_images.clear()
+            self.ref_canvas.delete("all")
+            self.ref_count_label.config(text=f"已选择: 0/{self.MAX_REF_IMAGES}张")
+            self.update_status("已清空所有参考图片")
+    # 生成图片
+    # ==================== TOML 配置子系统 ====================
     def _parse_toml(self, filepath):
         """解析 TOML 文件，返回 (config_dict, None) 或 (None, error_msg)"""
         if not TOML_AVAILABLE:
@@ -1666,6 +1857,11 @@ path = ""
             if model_lz is not None:
                 if not isinstance(model_lz, str) or model_lz not in self.TOML_VALID_VALUES["model_laozhang"]:
                     errors.append(f"api.model_laozhang 值不合法: {model_lz}")
+            # api.api_endpoint
+            ep = api.get("api_endpoint", None)
+            if ep is not None:
+                if not isinstance(ep, str) or ep not in self.TOML_VALID_VALUES["api_endpoint"]:
+                    errors.append(f"api.api_endpoint 值不合法: {ep}")
         else:
             if api is not None:
                 errors.append("[api] 段格式错误")
@@ -1741,12 +1937,12 @@ path = ""
 
         return (len(errors) == 0, errors)
 
-    # ==================== TOML 配置应用 ====================
     def _reset_all_to_defaults(self):
         """将所有可配置项恢复到默认值"""
         defaults = self.TOML_DEFAULTS
         self.api_key.set(defaults["api_key"])
         self.model_var.set(defaults["model_laozhang"])
+        self.api_endpoint_var.set(defaults["api_endpoint"])
         self.aspect_ratio.set(defaults["aspect_ratio"])
         self.resolution.set(defaults["resolution"])
         self.network_timeout.set(defaults["network_timeout"])
@@ -1794,6 +1990,16 @@ path = ""
                     self.model_var.set(model_val)
                 else:
                     self.update_status(f"配置中的 model_laozhang 值不合法 ({model_val})，已跳过")
+
+        # ---- [api] 端点和模型相关的额外字段 ----
+        if isinstance(api, dict):
+            if "api_endpoint" in api and api["api_endpoint"]:
+                endpoint_val = str(api["api_endpoint"])
+                valid_endpoints = self.TOML_VALID_VALUES.get("api_endpoint", [])
+                if endpoint_val in valid_endpoints:
+                    self.api_endpoint_var.set(endpoint_val)
+                else:
+                    self.update_status(f"配置中的 api_endpoint 值不合法 ({endpoint_val})，已跳过")
 
         # ---- [generation] ----
         gen = config_dict.get("generation", {})
@@ -1939,80 +2145,7 @@ path = ""
             self._apply_toml_config(config, "overwrite_existing")
             self.update_status(f"已导入配置文件 ({file_label}) — 模式: 覆盖已有")
 
-    # ==================== 原有方法 ====================
-    def update_ref_count_label(self):
-        """更新参考图片计数标签"""
-        self.ref_count_label.config(
-            text=f"已选择: {len(self.reference_images)}/{self.current_max_ref_images}张"
-        )
-
-    def update_reference_preview(self):
-        """更新参考图片预览"""
-        self.ref_canvas.delete("all")
-        x_offset = 5
-        
-        # 获取当前缩放比例
-        zoom_str = self.zoom_var.get().rstrip('%')
-        try:
-            scale = int(zoom_str) / 100.0
-        except:
-            scale = 1.0
-        
-        # 固定缩略图尺寸为120x120，确保高缩放倍率下清晰可见
-        thumb_size = 120
-        # 根据缩放比例调整显示尺寸
-        for idx, (filepath, _, _, original_img) in enumerate(self.reference_images):
-            # 从缓存的原始图像重新生成缩略图
-            thumb_img = original_img.copy()
-            thumb_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
-            
-            # 将 PIL 图像转换为 Tkinter 可用格式
-            tk_img = ImageTk.PhotoImage(thumb_img)
-            
-            # 在 canvas 上创建图像
-            img_id = self.ref_canvas.create_image(
-                x_offset, 5, anchor=tk.NW, image=tk_img
-            )
-            
-            # 保存引用防止被垃圾回收
-            if idx == 0:
-                self.ref_canvas.image_dict = {}
-            self.ref_canvas.image_dict[img_id] = tk_img
-            
-            # 删除按钮位置动态计算
-            btn_x = x_offset + thumb_size - 18
-            del_btn = tk.Button(
-                self.ref_canvas, text="×", fg="red", bg="white",
-                command=lambda i=idx: self.remove_reference(i),
-                font=("TkDefaultFont", 8), width=2, height=1,
-                bd=1, relief=tk.RAISED, activebackground="#ffd4d4"
-            )
-            self.ref_canvas.create_window(btn_x, 5, anchor=tk.NW, window=del_btn)
-            
-            x_offset += thumb_size + 10  # 每张图占用的宽度
-        
-        # 更新滚动区域
-        self.ref_canvas.config(scrollregion=(0, 0, x_offset, thumb_size + 10))
-        self.update_ref_count_label()
-    # 删除参考图片
-    def remove_reference(self, index):
-        """删除指定参考图片"""
-        if 0 <= index < len(self.reference_images):
-            del self.reference_images[index]
-            self.update_reference_preview()
-            self.update_status(f"已删除第 {index+1} 张参考图片")
-    # 清空参考图片
-    def clear_images(self):
-        """清空所有参考图片"""
-        if not self.reference_images:
-            return
-        # 确认清空
-        if messagebox.askyesno("确认", f"确定要清空 {len(self.reference_images)} 张参考图片吗？"):
-            self.reference_images.clear()
-            self.ref_canvas.delete("all")
-            self.ref_count_label.config(text=f"已选择: 0/{self.MAX_REF_IMAGES}张")
-            self.update_status("已清空所有参考图片")
-    # 生成图片
+    # ==================== 图片生成 ====================
     def generate_image(self):
         """开始生成图片"""
         # 验证输入
@@ -2075,6 +2208,14 @@ path = ""
                 self.update_status("用户取消生成（检测到代理启用）")
                 return
         
+        # ===== 后端选择统一化：通过注册表查找 =====
+        backend = self.get_backend_type()
+        generator_method = self._get_backend_generator(backend)
+        
+        if not generator_method:
+            messagebox.showerror("错误", f"不支持的后端类型: {backend}")
+            return
+        
         # 禁用生成按钮
         self.generate_btn.config(state=tk.DISABLED, text="生成中...")
         self.update_status("正在生成图片...")
@@ -2083,29 +2224,15 @@ path = ""
         if self.taskbar_progress:
             self.taskbar_progress.set_progress(0, 0x1)  # TBPF_INDETERMINATE
         
-        # 根据后端类型选择线程函数
-        backend = self.get_backend_type()
-        if backend == "gpt_image_vip":
-            self.generate_thread = threading.Thread(
-                target=self._generate_thread_gpt_vip,
-                args=(self.api_key.get(), prompt),
-                daemon=True
-            )
-        elif backend == "flux":
-            self.generate_thread = threading.Thread(
-                target=self._generate_thread_flux,
-                args=(self.api_key.get(), prompt),
-                daemon=True
-            )
-        else:
-            self.generate_thread = threading.Thread(
-                target=self._generate_thread,
-                args=(self.api_key.get(), prompt),
-                daemon=True
-            )
+        # 启动生成线程（统一方式）
+        self.generate_thread = threading.Thread(
+            target=generator_method,
+            args=(self.api_key.get(), prompt),
+            daemon=True
+        )
         self.generate_thread.start()
-    # 后台线程生成图片 (NanoBanana)
-    def _generate_thread(self, api_key, prompt):
+    # ==================== 后端实现 1: NanoBanana ==========
+    def _generate_nanobanana(self, api_key, prompt):
         """后台线程执行NanoBanana API调用"""
         try:
             # 构建请求数据
@@ -2132,8 +2259,9 @@ path = ""
                 }
             }
             
-            # Nano Banana 2 支持分辨率参数
-            if self.model_var.get() in ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]:
+            # Nano Banana 2 支持分辨率参数（由 MODEL_CONFIGS 驱动）
+            nb_config = self.MODEL_CONFIGS.get(self.model_var.get(), {})
+            if nb_config.get("supports_image_size"):
                 payload["generationConfig"]["imageConfig"]["imageSize"] = self.resolution.get()
             
             # 发送请求
@@ -2156,16 +2284,16 @@ path = ""
             
             # 确定实际发送的 imageSize（stable 模型不发送）
             actual_image_size = None
-            if self.model_var.get() in ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]:
+            if nb_config.get("supports_image_size"):
                 actual_image_size = self.resolution.get()
             
-            # 在主线程中处理响应
-            self.root.after(0, self._handle_response, response, full_url, actual_image_size)
+            # 在主线程中处理响应（通过分发器）
+            self.root.after(0, self._dispatch_response_handler, response, full_url, "nanobanana", actual_image_size)
         except Exception as e:
             self.root.after(0, self._handle_error, str(e), full_url)
 
-    # 后台线程生成图片 (GPT Image 2 VIP)
-    def _generate_thread_gpt_vip(self, api_key, prompt):
+    # ==================== 后端实现 2: GPT VIP ==========
+    def _generate_gpt_vip(self, api_key, prompt):
         """后台线程执行GPT Image 2 VIP API调用"""
         # 获取超时设置
         timeout_val = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
@@ -2228,8 +2356,8 @@ path = ""
             # 确定 GPT 调用类型
             gpt_endpoint_type = "edits" if self.reference_images else "generations"
             
-            # 在主线程中处理响应
-            self.root.after(0, self._handle_response_gpt_vip, response, full_url, gpt_endpoint_type)
+            # 在主线程中处理响应（通过分发器）
+            self.root.after(0, self._dispatch_response_handler, response, full_url, "gpt_image_vip", gpt_endpoint_type)
         except Exception as e:
             self.root.after(0, self._handle_error, str(e), full_url if full_url else base_url)
         finally:
@@ -2240,8 +2368,8 @@ path = ""
                 except Exception:
                     pass
 
-    # 后台线程生成图片 (Flux 2)
-    def _generate_thread_flux(self, api_key, prompt):
+    # ==================== 后端实现 3: Flux 2 ==========
+    def _generate_flux(self, api_key, prompt):
         """后台线程执行 Flux 2 API调用
         
         Flux 2 特点：
@@ -2315,14 +2443,14 @@ path = ""
                 timeout=timeout
             )
             
-            # Flux 和 GPT VIP 响应格式相同，复用处理方法
-            self.root.after(0, self._handle_response_gpt_vip, response, full_url, "flux_generations")
+            # Flux 和 GPT VIP 响应格式相同，通过分发器处理
+            self.root.after(0, self._dispatch_response_handler, response, full_url, "flux", "flux_generations")
             
         except Exception as e:
             self.root.after(0, self._handle_error, str(e), base_url)
 
     # 处理API响应 (NanoBanana)
-    def _handle_response(self, response, url=None, actual_image_size=None):
+    def _handle_response_nanobanana(self, response, url=None, actual_image_size=None):
         """处理NanoBanana API响应"""
         try:
             # 检查HTTP状态码
@@ -2442,7 +2570,8 @@ path = ""
                 elif "url" in image_item and image_item["url"]:
                     # 如果是URL，下载图片
                     self.update_status("检测到URL返回，正在下载图片...")
-                    img_response = requests.get(image_item["url"], timeout=60)
+                    _dl_to = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
+                    img_response = requests.get(image_item["url"], timeout=None if _dl_to == 0 else _dl_to)
                     img_response.raise_for_status()
                     image_data = base64.b64encode(img_response.content).decode("utf-8")
                 else:
@@ -2476,6 +2605,21 @@ path = ""
                 self.update_status(f"生成失败: {str(e)[:50]}...")
         finally:
             self.generate_btn.config(state=tk.NORMAL, text="生成图片")
+
+    # ==================== 后端实现: Flux 响应处理 ==========
+    def _handle_response_flux(self, response, url=None, flux_endpoint_type=None):
+        """处理 Flux 2 API 响应（复用 GPT VIP 的 handler）"""
+        self._handle_response_gpt_vip(response, url, flux_endpoint_type)
+
+    # ==================== 新增：响应分发器 ============
+    def _dispatch_response_handler(self, response, url, backend_type, *extra_args):
+        """统一分发响应处理（替代原来的多个 if-elif）"""
+        handler = self._get_backend_handler(backend_type)
+        if handler:
+            handler(response, url, *extra_args)
+        else:
+            self._handle_error(f"找不到后端处理器: {backend_type}", url)
+
     # 处理异常错误
     def _handle_error(self, error_msg, url=None):
         """处理异常错误"""
@@ -2499,6 +2643,7 @@ path = ""
             self._save_log({"error": error_msg, "exception": True}, "error", url=url)
     
     # 参数确认弹窗
+    # ==================== 参数与确认弹窗 ====================
     def _show_param_confirm_dialog(self):
         """显示生成前参数确认弹窗，返回用户是否通过验证"""
         dialog = tk.Toplevel(self.root)
@@ -2698,6 +2843,7 @@ path = ""
         self.root.wait_window(dialog)
         return result["choice"]
     # 优化显示数据
+    # ==================== 图片显示与保存 ====================
     def _optimize_display_data(self, data, max_str_len=500):
         """**改进：统一处理数据优化，避免重复检测**"""
         if isinstance(data, dict):
@@ -2785,18 +2931,9 @@ path = ""
         # 优先使用生成时记录的模型，如果没有则回退到当前选中模型
         saved_model = getattr(self, 'current_image_model', self.model_var.get())
         saved_config = self.MODEL_CONFIGS.get(saved_model, {})
-        saved_backend = saved_config.get("backend", "nanobanana")
-        
-        if saved_backend == "gpt_image_vip":
-            model_short = "vip"
-            prefix = "gpt_images2"
-        elif saved_backend == "flux":
-            model_short = saved_model.split("-")[-1] if "-" in saved_model else saved_model
-            prefix = "flux2"
-        else:
-            model_short = saved_model.split("-")[1] if "-" in saved_model else saved_model
-            prefix = "gemini"
-        default_filename = f"{prefix}_{model_short}_{self.resolution.get()}_{timestamp}{default_ext}"
+        prefix = saved_config.get("file_prefix", "gemini")
+        model_tag = saved_config.get("model_tag", saved_model.split("-")[-1] if "-" in saved_model else saved_model)
+        default_filename = f"{prefix}_{model_tag}_{self.resolution.get()}_{timestamp}{default_ext}"
         
         # 设置文件类型选项
         if self.current_image_mime_type == "image/jpeg":
@@ -2983,6 +3120,7 @@ path = ""
         text_widget.insert("1.0", json.dumps(self.last_raw_response, indent=2, ensure_ascii=False))
         text_widget.config(state=tk.DISABLED)
     # 保存日志到文件
+    # ==================== 日志 ====================
     def _save_log(self, data, log_type, url=None, actual_image_size=None, gpt_endpoint_type=None):
         """保存日志到文件"""
         try:
@@ -2994,20 +3132,8 @@ path = ""
             config = self.MODEL_CONFIGS.get(model, {})
             backend = config.get("backend", "nanobanana")
             
-            # 根据后端类型和模型名构建文件名前缀
-            if backend == "gpt_image_vip":
-                file_prefix = "GPT-image-2"
-            elif backend == "flux":
-                file_prefix = "Flux-2"
-            else:
-                parts = model.split("-")
-                if len(parts) >= 2:
-                    version_str = parts[1]
-                    if "." not in version_str:
-                        version_str = version_str + ".0"
-                    file_prefix = "Gemini-" + version_str
-                else:
-                    file_prefix = "Gemini-unknown"
+            # 根据后端类型和模型名构建文件名前缀（由 MODEL_CONFIGS 驱动）
+            file_prefix = config.get("log_prefix", "Gemini-unknown")
             
             # 生成日志文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3027,6 +3153,7 @@ path = ""
                 "backend": backend,
                 "prompt": self.prompt_text.get("1.0", tk.END).strip(),
                 "aspect_ratio": self.aspect_ratio.get(),
+                "api_endpoint": self.api_endpoint_var.get(),
                 "image_size": image_size_to_log,
                 "network_timeout": self.network_timeout.get(),
                 "reference_images": len(self.reference_images),
@@ -3069,11 +3196,11 @@ path = ""
             self.update_status("已禁用日志记录")
 
     # 模型切换处理
+    # ==================== UI 事件 ====================
     def on_model_change(self, event=None):
         """模型切换时更新分辨率选项、参考图片上限和界面状态"""
         model = self.model_var.get().strip()
         config = self.MODEL_CONFIGS.get(model, {})
-        backend = config.get("backend", "nanobanana")
         # 更新参考图片上限
         self.current_max_ref_images = config.get("max_ref_images", 14)
         # 更新参考图片区域标题和计数显示
@@ -3089,16 +3216,11 @@ path = ""
             )
             self.reference_images = self.reference_images[:self.current_max_ref_images]
             self.update_reference_preview()
-        # 根据模型配置更新分辨率选项
-        if config.get("stable"):  # gemini-2.5-flash-image
-            self.resolution_combo.config(values=["1K"], state="readonly")
-            self.resolution.set("1K")
-        elif backend == "flux":
-            self.resolution_combo.config(values=["1K", "2K"], state="readonly")
-            self.resolution.set("2K")
-        else:
-            self.resolution_combo.config(values=["1K", "2K", "4K"], state="readonly")
-            self.resolution.set("4K")  # 默认4K
+        # 根据模型配置更新分辨率选项（完全由 MODEL_CONFIGS 驱动）
+        available = config.get("resolutions", ["1K"])
+        self.resolution_combo.config(values=available, state="readonly")
+        if self.resolution.get() not in available:
+            self.resolution.set(available[-1])  # 当前分辨率不可用时切换到最高可用
     # 缩放比例变化处理
     def on_zoom_change(self, event=None):
         self._apply_zoom()
@@ -3326,7 +3448,7 @@ path = ""
         except Exception:
             pass # 没关系，反正最小化失败也不影响使用，就是终端还在那儿而已
 
-    # ==================== 关闭拦截功能 ====================
+    # ==================== 关闭拦截 ====================
     def _intercept_close(self):
         """拦截窗口关闭请求"""
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
@@ -3462,6 +3584,7 @@ path = ""
         """**改进：防止用户编辑只读文本框**"""
         return "break"  # 阻止事件继续传递，防止文本框获得焦点
 # ==================== 主程序入口 ====================
+
 def main():
     # ========== 关键修复：切换到脚本所在目录 ==========
     # 获取脚本文件的绝对路径
