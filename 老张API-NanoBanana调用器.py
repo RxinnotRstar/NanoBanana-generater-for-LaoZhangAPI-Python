@@ -394,7 +394,7 @@ class GeminiImageGenerator:
             "stable": True,
             "backend": "nanobanana",
             "max_ref_images": 14,
-            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "base_url": "",
             "supports_image_size": False,
             "file_prefix": "gemini",
             "model_tag": "2.5",
@@ -405,7 +405,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "nanobanana",
             "max_ref_images": 14,
-            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "base_url": "",
             "supports_image_size": True,
             "file_prefix": "gemini",
             "model_tag": "3",
@@ -416,7 +416,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "nanobanana",
             "max_ref_images": 14,
-            "base_url": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "base_url": "",
             "supports_image_size": True,
             "file_prefix": "gemini",
             "model_tag": "3.1",
@@ -427,7 +427,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "gpt_image_vip",
             "max_ref_images": 10,
-            "base_url": "https://api.laozhang.ai/v1",
+            "base_url": "",
             "supports_image_size": False,
             "file_prefix": "gpt_images2",
             "model_tag": "vip",
@@ -438,7 +438,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "flux",
             "max_ref_images": 8,
-            "base_url": "https://api.laozhang.ai/v1",
+            "base_url": "",
             "supports_image_size": False,
             "file_prefix": "flux2",
             "model_tag": "pro",
@@ -449,7 +449,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "flux",
             "max_ref_images": 8,
-            "base_url": "https://api.laozhang.ai/v1",
+            "base_url": "",
             "supports_image_size": False,
             "file_prefix": "flux2",
             "model_tag": "flex",
@@ -460,7 +460,7 @@ class GeminiImageGenerator:
             "stable": False,
             "backend": "flux",
             "max_ref_images": 8,
-            "base_url": "https://api.laozhang.ai/v1",
+            "base_url": "",
             "supports_image_size": False,
             "file_prefix": "flux2",
             "model_tag": "max",
@@ -471,12 +471,18 @@ class GeminiImageGenerator:
     # ==================== API 端点配置 ====================
     # 各 API 端点对应不同后端的 base_url。
     # 新增端点只需在此添加一条记录，前端自动出现下拉选项。
-    # 端点值为空字符串时，回退到 MODEL_CONFIGS 中对应模型的 base_url。
+    # 每个端点必须为所有后端（nanobanana / gpt_image_vip / flux）填写 URL，
+    # 否则生成图片时会直接报错，不会回退到任何默认地址。
     API_ENDPOINTS = {
         "api.laozhang.ai": {
             "nanobanana": "https://api.laozhang.ai/v1beta/models/{model_id}:generateContent",
             "gpt_image_vip": "https://api.laozhang.ai/v1",
             "flux": "https://api.laozhang.ai/v1"
+        },
+        "api2.laozhang.ai": {
+            "nanobanana": "https://api2.laozhang.ai/v1beta/models/{model_id}:generateContent",
+            "gpt_image_vip": "https://api2.laozhang.ai/v1",
+            "flux": "https://api2.laozhang.ai/v1"
         }
     }
 
@@ -661,9 +667,11 @@ key_laozhang = ""
 
 # 【API端点】
 # API端点决定了请求发往哪个服务器，下拉框直接显示域名。可选值会随脚本版本更新。
+# 多平台共用一份 toml 时，建议使用新字段 endpoint_laozhang 指定老张平台的端点，
+# 这样不会影响其他平台脚本对该文件的读取。
 
 ##### 下一行开始编写你的内容 #####
-api_endpoint = "api.laozhang.ai"
+endpoint_laozhang = "api.laozhang.ai"
 
 
 
@@ -1448,8 +1456,8 @@ path = ""
     # ==================== 核心工具方法 ====================
     def get_api_url(self):
         """获取当前模型的 API 端点
-        优先使用 API_ENDPOINTS 中选中端点的 base_url，
-        若该端点的对应后端值为空，则回退到 MODEL_CONFIGS 的 base_url。
+        从 API_ENDPOINTS 中选中端点获取对应后端的 base_url。
+        如果该端点未配置此后端，直接报错。
         """
         model_id = self.model_var.get()
         config = self.MODEL_CONFIGS.get(model_id, {})
@@ -1457,8 +1465,12 @@ path = ""
         endpoint_name = self.api_endpoint_var.get()
         # 从选中的端点获取 base_url
         endpoint = self.API_ENDPOINTS.get(endpoint_name, {})
-        endpoint_url = endpoint.get(backend, "") if endpoint else ""
-        template = endpoint_url or config.get("base_url", "")
+        template = endpoint.get(backend, "") if endpoint else ""
+        if not template:
+            raise ValueError(
+                f"API 端点「{endpoint_name}」未配置后端「{backend}」的 URL。\n"
+                f"请在 API_ENDPOINTS 中为该端点补充 {backend} 的地址。"
+            )
         if "{model_id}" in template:
             return template.format(model_id=model_id)
         return template
@@ -1857,11 +1869,16 @@ path = ""
             if model_lz is not None:
                 if not isinstance(model_lz, str) or model_lz not in self.TOML_VALID_VALUES["model_laozhang"]:
                     errors.append(f"api.model_laozhang 值不合法: {model_lz}")
-            # api.api_endpoint
+            # api.api_endpoint（旧字段，保留兼容）
             ep = api.get("api_endpoint", None)
             if ep is not None:
                 if not isinstance(ep, str) or ep not in self.TOML_VALID_VALUES["api_endpoint"]:
                     errors.append(f"api.api_endpoint 值不合法: {ep}")
+            # api.endpoint_laozhang（新字段：多平台共用 toml 时指定老张平台端点）
+            ep_lz = api.get("endpoint_laozhang", None)
+            if ep_lz is not None:
+                if not isinstance(ep_lz, str) or ep_lz not in self.TOML_VALID_VALUES["api_endpoint"]:
+                    errors.append(f"api.endpoint_laozhang 值不合法: {ep_lz}")
         else:
             if api is not None:
                 errors.append("[api] 段格式错误")
@@ -1993,7 +2010,18 @@ path = ""
 
         # ---- [api] 端点和模型相关的额外字段 ----
         if isinstance(api, dict):
-            if "api_endpoint" in api and api["api_endpoint"]:
+            # 新字段优先：endpoint_laozhang 指定老张平台端点（多平台共用 toml 时用）
+            endpoint_set = False
+            if "endpoint_laozhang" in api and api["endpoint_laozhang"]:
+                endpoint_val = str(api["endpoint_laozhang"])
+                valid_endpoints = self.TOML_VALID_VALUES.get("api_endpoint", [])
+                if endpoint_val in valid_endpoints:
+                    self.api_endpoint_var.set(endpoint_val)
+                    endpoint_set = True
+                else:
+                    self.update_status(f"配置中的 endpoint_laozhang 值不合法 ({endpoint_val})，已跳过")
+            # 旧字段兼容：api_endpoint
+            if not endpoint_set and "api_endpoint" in api and api["api_endpoint"]:
                 endpoint_val = str(api["api_endpoint"])
                 valid_endpoints = self.TOML_VALID_VALUES.get("api_endpoint", [])
                 if endpoint_val in valid_endpoints:
