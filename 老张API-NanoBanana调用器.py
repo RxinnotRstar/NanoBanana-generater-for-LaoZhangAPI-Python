@@ -903,6 +903,18 @@ path = ""
         # 记录上一次通过验证的参数组合（模型, 纵横比, 分辨率）
         self.last_verified_params = None
 
+        # ————性能优化：缓存与连接复用
+        # 网络会话复用（TCP/TLS 连接池，省去每次请求的握手开销）
+        self.http_session = requests.Session()
+        # 当前生成图片的原始字节（解码一次缓存，保存/复制时直接复用，避免反复 base64 解码）
+        self.current_image_bytes = None
+        # 参考图片缩略图缓存 {文件路径: (mtime, PhotoImage)}，避免每次刷新都对大图做 LANCZOS
+        self._thumb_cache = {}
+        # 预览图缩放结果缓存 {(目标宽, 目标高): PhotoImage}，窗口拖动时避免重复重采样
+        self._preview_cache = {}
+        # 预览缩放防抖任务ID（<Configure> 高频触发时合并为一次执行）
+        self._resize_after_id = None
+
         # 关闭拦截失败计数器（独立计数，切换弹窗类型时清零）
         self.button_fail_count = 0
         self.slider_fail_count = 0
@@ -1614,7 +1626,10 @@ path = ""
                 # 读取原始图片并生成缩略图
                 mime_type = self.get_mime_type(filepath)
                 # 修复：正确读取原始图片对象
-                original_img = Image.open(filepath)
+                # 性能优化：with 块 + copy()，加载后立即释放文件句柄，
+                # 避免 PIL 惰性加载导致文件长期被占用（Windows 下无法移动/删除图片）
+                with Image.open(filepath) as _im:
+                    original_img = _im.copy()
                 # 存储：文件路径, base64, mime类型, 原始PIL图像
                 self.reference_images.append((filepath, image_b64, mime_type, original_img))
                 added_count += 1
@@ -1755,14 +1770,15 @@ path = ""
         
         # 固定缩略图尺寸为120x120，确保高缩放倍率下清晰可见
         thumb_size = 120
+        # 性能优化：清理已不在列表中的缓存项，防止缓存无限增长
+        current_paths = {fp for fp, *_ in self.reference_images}
+        self._thumb_cache = {k: v for k, v in self._thumb_cache.items() if k in current_paths}
         # 根据缩放比例调整显示尺寸
         for idx, (filepath, _, _, original_img) in enumerate(self.reference_images):
-            # 从缓存的原始图像重新生成缩略图
-            thumb_img = original_img.copy()
-            thumb_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+            # 性能优化：缩略图缓存，同一张图只重采样一次（LANCZOS 对大图开销很大）
+            tk_img = self._get_ref_thumbnail(filepath, original_img, thumb_size)
             
-            # 将 PIL 图像转换为 Tkinter 可用格式
-            tk_img = ImageTk.PhotoImage(thumb_img)
+            # tk_img 已由 _get_ref_thumbnail 返回（内部完成 PIL→Tk 转换）
             
             # 在 canvas 上创建图像
             img_id = self.ref_canvas.create_image(
@@ -1789,6 +1805,21 @@ path = ""
         # 更新滚动区域
         self.ref_canvas.config(scrollregion=(0, 0, x_offset, thumb_size + 10))
         self.update_ref_count_label()
+
+    def _get_ref_thumbnail(self, filepath, original_img, thumb_size):
+        """生成或复用参考图片缩略图（按 路径+修改时间 缓存，文件变动自动失效）"""
+        try:
+            mtime = os.path.getmtime(filepath)
+        except OSError:
+            mtime = None
+        cached = self._thumb_cache.get(filepath)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        thumb_img = original_img.copy()
+        thumb_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+        tk_img = ImageTk.PhotoImage(thumb_img)
+        self._thumb_cache[filepath] = (mtime, tk_img)
+        return tk_img
     # 删除参考图片
     def remove_reference(self, index):
         """删除指定参考图片"""
@@ -2082,11 +2113,15 @@ path = ""
                         mime_type = self.get_mime_type(resolved)
                         with open(resolved, "rb") as f:
                             image_b64 = base64.b64encode(f.read()).decode("utf-8")
-                        original_img = Image.open(resolved)
+                        # 性能优化：with 块 + copy()，立即释放文件句柄
+                        with Image.open(resolved) as _im:
+                            original_img = _im.copy()
                         self.reference_images.append(
                             (resolved, image_b64, mime_type, original_img)
                         )
-                    except Exception:
+                    except Exception as e:
+                        # 不再静默吞掉错误，提示具体哪张图加载失败，便于排查
+                        self.update_status(f"参考图片加载失败，已跳过: {path} ({e})")
                         continue
             self.update_reference_preview()
 
@@ -2303,7 +2338,7 @@ path = ""
             timeout = None if timeout_val == 0 else timeout_val
             
             full_url = self.get_api_url()
-            response = requests.post(
+            response = self.http_session.post(
                 full_url,
                 headers=headers,
                 json=payload,
@@ -2358,7 +2393,7 @@ path = ""
                     opened_files.append(f)
                     files.append(("image", (os.path.basename(filepath), f, mime_type)))
                 
-                response = requests.post(
+                response = self.http_session.post(
                     full_url,
                     headers=headers,
                     data=data,
@@ -2374,7 +2409,7 @@ path = ""
                     "size": size
                 }
                 
-                response = requests.post(
+                response = self.http_session.post(
                     full_url,
                     headers={**headers, "Content-Type": "application/json"},
                     json=payload,
@@ -2383,6 +2418,9 @@ path = ""
             
             # 确定 GPT 调用类型
             gpt_endpoint_type = "edits" if self.reference_images else "generations"
+            
+            # 性能优化：若返回图片 URL，先在后台线程下载完再交给主线程
+            self._prefetch_url_image(response)
             
             # 在主线程中处理响应（通过分发器）
             self.root.after(0, self._dispatch_response_handler, response, full_url, "gpt_image_vip", gpt_endpoint_type)
@@ -2395,6 +2433,33 @@ path = ""
                     f.close()
                 except Exception:
                     pass
+
+    def _prefetch_url_image(self, response):
+        """若响应中的图片以 URL 形式返回，在后台线程预先下载并转为 b64_json
+
+        避免在主线程的响应处理器里同步下载大图，导致界面冻结。
+        预下载失败时保持原样，由主线程原有逻辑兜底处理。
+        """
+        try:
+            if response is None or response.status_code != 200:
+                return
+            result = response.json()
+            data = result.get("data") if isinstance(result, dict) else None
+            if not data or not isinstance(data, list):
+                return
+            item = data[0]
+            if item.get("b64_json") or not item.get("url"):
+                return
+            self.root.after(0, self.update_status, "检测到URL返回，正在下载图片...")
+            _dl_to = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
+            img_response = self.http_session.get(item["url"], timeout=None if _dl_to == 0 else _dl_to)
+            img_response.raise_for_status()
+            item["b64_json"] = base64.b64encode(img_response.content).decode("utf-8")
+            item.pop("url", None)
+            # 将补丁后的 JSON 写回响应对象，主线程 handler 直接读到 b64_json
+            response._content = json.dumps(result).encode("utf-8")
+        except Exception:
+            pass
 
     # ==================== 后端实现 3: Flux 2 ==========
     def _generate_flux(self, api_key, prompt):
@@ -2464,14 +2529,17 @@ path = ""
             
             full_url = f"{base_url}/images/generations"
             
-            response = requests.post(
+            response = self.http_session.post(
                 full_url,
                 headers=headers,
                 json=payload,
                 timeout=timeout
             )
             
-            # Flux 和 GPT VIP 响应格式相同，通过分发器处理
+                        # 性能优化：若返回图片 URL，先在后台线程下载完再交给主线程
+            self._prefetch_url_image(response)
+            
+# Flux 和 GPT VIP 响应格式相同，通过分发器处理
             self.root.after(0, self._dispatch_response_handler, response, full_url, "flux", "flux_generations")
             
         except Exception as e:
@@ -2599,7 +2667,7 @@ path = ""
                     # 如果是URL，下载图片
                     self.update_status("检测到URL返回，正在下载图片...")
                     _dl_to = int(self.network_timeout.get()) if self.network_timeout.get().isdigit() else 1200
-                    img_response = requests.get(image_item["url"], timeout=None if _dl_to == 0 else _dl_to)
+                    img_response = self.http_session.get(image_item["url"], timeout=None if _dl_to == 0 else _dl_to)
                     img_response.raise_for_status()
                     image_data = base64.b64encode(img_response.content).decode("utf-8")
                 else:
@@ -2899,8 +2967,11 @@ path = ""
 
         try:
             # 解码Base64数据并保存原始图片
+            # 性能优化：解码结果缓存为字节，保存/复制图片时直接复用，不再重复解码
             image_bytes = base64.b64decode(self.current_image_data)
+            self.current_image_bytes = image_bytes
             self.original_image = Image.open(io.BytesIO(image_bytes))
+            self._preview_cache = {}  # 新图片到来，旧的缩放缓存全部失效
             
             # 初始显示图片
             self._resize_image()
@@ -2913,7 +2984,20 @@ path = ""
             self.img_preview.config(text="显示失败", image="")
     # 根据预览区域大小调整图片
     def _resize_image(self, event=None):
-        """根据预览区域大小调整图片"""
+        """根据预览区域大小调整图片（防抖入口）
+
+        <Configure> 事件在拖动窗口时每秒触发几十次，此处延迟合并为一次执行
+        """
+        if not hasattr(self, 'original_image') or not self.original_image:
+            return
+        # 防抖：取消上一次未执行的缩放任务，100ms 后统一执行
+        if self._resize_after_id is not None:
+            self.root.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.root.after(100, self._do_resize_image)
+
+    def _do_resize_image(self):
+        """实际执行预览图缩放（带结果缓存）"""
+        self._resize_after_id = None
         if not hasattr(self, 'original_image') or not self.original_image:
             return
         # 调整图片大小以适应预览区域
@@ -2925,12 +3009,23 @@ path = ""
             if preview_width <= 1 or preview_height <= 1:
                 return
             
-            # 创建副本并调整大小
-            img_copy = self.original_image.copy()
-            img_copy.thumbnail((preview_width - 20, preview_height - 20), Image.Resampling.LANCZOS)
-            
-            # 转换为Tkinter格式
-            tk_img = ImageTk.PhotoImage(img_copy)
+            target_w, target_h = preview_width - 20, preview_height - 20
+            if target_w <= 0 or target_h <= 0:
+                return
+
+            # 性能优化：同尺寸结果直接命中缓存，避免拖动窗口时反复重采样大图
+            cache_key = (target_w, target_h)
+            tk_img = self._preview_cache.get(cache_key)
+            if tk_img is None:
+                # 直接 resize 到目标尺寸，替代 copy()+thumbnail()，省掉一次全尺寸像素拷贝
+                # （thumbnail 只缩小不放大，min(..., 1.0) 保持相同行为）
+                src_w, src_h = self.original_image.size
+                scale_ratio = min(target_w / src_w, target_h / src_h, 1.0)
+                new_size = (max(1, int(src_w * scale_ratio)), max(1, int(src_h * scale_ratio)))
+                img_copy = self.original_image.resize(new_size, Image.Resampling.LANCZOS)
+                tk_img = ImageTk.PhotoImage(img_copy)
+                # 只保留最新尺寸的缓存，防止拖动过程中缓存膨胀
+                self._preview_cache = {cache_key: tk_img}
             self.current_image_preview = tk_img  # 保持引用
             
             # 显示图片
@@ -2981,7 +3076,10 @@ path = ""
             return
         # 保存图片文件
         try:
-            image_bytes = base64.b64decode(self.current_image_data)
+            # 性能优化：优先复用生成时已解码的字节，避免重复 base64 解码
+            image_bytes = getattr(self, 'current_image_bytes', None)
+            if not image_bytes:
+                image_bytes = base64.b64decode(self.current_image_data)
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
             # 更新状态栏
@@ -3004,7 +3102,10 @@ path = ""
             return
         # 根据平台调用不同方法
         try:
-            image_bytes = base64.b64decode(self.current_image_data)
+            # 性能优化：优先复用生成时已解码的字节，避免重复 base64 解码
+            image_bytes = getattr(self, 'current_image_bytes', None)
+            if not image_bytes:
+                image_bytes = base64.b64decode(self.current_image_data)
             img = Image.open(io.BytesIO(image_bytes))
             # 检测平台
             system = platform.system()
@@ -3317,6 +3418,7 @@ path = ""
         self.update_reference_preview()
         
         self.current_image_data = state['current_image_data']
+        self.current_image_bytes = None  # 字节缓存置空，由 _show_image 重新解码
         self.current_image_mime_type = state.get('current_image_mime_type', 'image/png')
         self.current_image_model = state.get('current_image_model', None)
         if self.current_image_data:
